@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+let cron; try { cron = require('node-cron'); } catch(e) { console.warn('[Cron] node-cron not installed, skipping scheduled tasks'); }
 const helmet = require('helmet');
 const compression = require('compression');
 const cors = require('cors');
@@ -53,6 +54,7 @@ const rejectSA = [authenticate, (req, res, next) => {
 app.use('/api/sales',   rejectSA, require('./routes/sales'));
 app.use('/api/shifts',  rejectSA, require('./routes/shifts'));
 app.use('/api/payroll', rejectSA, require('./routes/payroll'));
+app.use('/api/notifications', rejectSA, require('./routes/notifications'));
 app.use('/api',         rejectSA, require('./routes/api'));
 
 // ── Health ─────────────────────────────────────────────────────────────────
@@ -73,6 +75,18 @@ db.ready().then(() => {
     console.log(`   Mode: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   PWA:  http://localhost:${PORT}\n`);
   });
+
+  // ── Sprint 4: Cron Jobs ─────────────────────────────────────────────
+  if (cron) {
+    const { runCreditReminderCron } = require('./routes/notifications');
+    // Credit reminders: every day at 9:00 AM IST
+    cron.schedule('0 3 * * *', () => {
+      console.log('[Cron] Running credit reminder job...');
+      runCreditReminderCron().catch(e => console.error('[Cron] Credit reminder error:', e.message));
+    }, { timezone: 'Asia/Kolkata' });
+    console.log('   Cron: Credit reminders scheduled (09:00 IST daily)');
+  }
+
 }).catch(err => { console.error('[Fatal] DB init failed:', err); process.exit(1); });
 
 module.exports = app;

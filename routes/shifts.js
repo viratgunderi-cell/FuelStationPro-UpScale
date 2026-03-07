@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+let triggerDayCloseSummary; try { triggerDayCloseSummary = require('./notifications').triggerDayCloseSummary; } catch(e) {}
 const db = require('../db/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const router = express.Router();
@@ -37,6 +38,10 @@ router.put('/:id/close', authorize('owner','manager'), async (req, res) => {
   const variance = cashPhysical - (shift.cash_collected || 0);
   await db.run(`UPDATE shifts SET status='closed',closed_by=?,close_time=datetime('now'),cash_physical=?,cash_variance=?,notes=?,closing_readings='{}' WHERE id=?`,
     [req.user.id, cashPhysical, variance, notes, shift.id]);
+  // Sprint 4: Trigger WhatsApp day-close summary
+  const closeDate = new Date().toISOString().slice(0,10);
+  if (triggerDayCloseSummary) triggerDayCloseSummary(sid, closeDate).catch(() => {});
+
   res.json({
     success: true,
     message: 'Shift closed.',

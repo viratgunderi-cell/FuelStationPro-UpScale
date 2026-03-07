@@ -148,6 +148,19 @@ router.get('/me', authenticate, async (req, res) => {
   return res.json({ success: true, user, station });
 });
 
+router.post('/change-password', authenticate,
+  [body('currentPassword').notEmpty(), body('newPassword').isLength({min:8}).matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])/)],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Password must be 8+ chars with upper, lower, number and special char.' });
+    const { currentPassword, newPassword } = req.body;
+    const user = await db.get('SELECT password_hash FROM users WHERE id=? AND station_id=?', [req.user.id, req.user.stationId]);
+    if (!user || !bcrypt.compareSync(currentPassword, user.password_hash)) return res.status(401).json({ success: false, error: 'Current password incorrect.' });
+    await db.run(`UPDATE users SET password_hash=?,updated_at=datetime('now') WHERE id=?`, [bcrypt.hashSync(newPassword, 12), req.user.id]);
+    await db.run('DELETE FROM refresh_tokens WHERE user_id=?', [req.user.id]);
+    return res.json({ success: true, message: 'Password changed.' });
+  }
+);
 router.put('/change-password', authenticate,
   [body('currentPassword').notEmpty(), body('newPassword').isLength({min:8}).matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])/)],
   async (req, res) => {

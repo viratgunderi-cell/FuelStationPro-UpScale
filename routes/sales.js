@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+let triggerLowStockCheck; try { triggerLowStockCheck = require('./notifications').triggerLowStockCheck; } catch(e) {}
 const { body, query, validationResult } = require('express-validator');
 const db = require('../db/database');
 const { authenticate, authorize } = require('../middleware/auth');
@@ -80,6 +81,8 @@ router.post('/', heavyLimiter,
         }
       });
       await db.logAudit(sid, req.user.id, req.user.username, 'SALE', 'sales', null, null, {invoiceNo, fuelType, quantity, amount, paymentMode}, req.ip, req.get('user-agent'));
+      // Sprint 4: Check low stock after sale
+      if (triggerLowStockCheck) triggerLowStockCheck(sid).catch(() => {});
       res.status(201).json({ success: true, message: 'Sale recorded.', invoiceNo, amount });
     } catch(e) { console.error('[sales/post]', e.message); res.status(500).json({ success: false, error: 'Server error.' }); }
   }

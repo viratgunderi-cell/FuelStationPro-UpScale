@@ -549,6 +549,9 @@ input,select,textarea{font-family:inherit}
           <button class="nav-link" id="nav-settings" onclick="navTo('settings')">
             <span class="nav-link-icon">⚙️</span> Settings
           </button>
+          <button class="nav-link" id="nav-notifications" onclick="navTo('notifications')">
+            <span class="nav-link-icon">💬</span> WhatsApp Alerts <span id="notifBadge" style="display:none;background:var(--red);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px">!</span>
+          </button>
         </div>
       </nav>
 
@@ -627,6 +630,12 @@ let shiftId=null, tanks=[], customers=[];
 let activeCharts = {};
 
 function payIcon(m){return {cash:'💵',phonepe:'📱',gpay:'🟢',paytm:'🔵',card:'💳',credit:'📋',neft:'🏦'}[m]||'💳';}
+function refreshNotifBadge(){
+  apiFetch('/api/notifications/stats').then(r=>r.json()).then(d=>{
+    const b=document.getElementById('notifBadge');
+    if(b) b.style.display=(d.data?.failedToday>0)?'':'none';
+  }).catch(()=>{});
+}
 function showToast(msg,type='success'){const t=document.getElementById('toast');t.textContent=msg;t.className=`toast ${type} show`;setTimeout(()=>t.classList.remove('show'),3000);}
 
 // ── Chart cleanup helper ───────────────────────────────────────────────────
@@ -767,6 +776,8 @@ function showApp(){
   const ts=document.getElementById('topbarSub'); if(ts) ts.textContent=`${sn}${sc?' · '+sc:''}`;
   idleTimeout=(currentStation?.idleTimeout||15)*60;
   startIdleTimer(); startClock(); navigate('dashboard');
+  // Load notification badge on start
+  setTimeout(refreshNotifBadge, 2000);
 }
 function showSuperAdmin(){
   document.getElementById('authScreen').style.display='none';
@@ -793,6 +804,7 @@ const pageMeta = {
   reports:{title:'Reports & Analytics',sub:'Daily · Stock · Performance'},
   settings:{title:'Settings',sub:'Station config & users'},
   audit:{title:'Audit Log',sub:'Full activity history'},
+  notifications:{title:'WhatsApp Alerts',sub:'Notifications · Alerts · Message log'},
 };
 
 // ── Navigation ────────────────────────────────────────────────────────────
@@ -819,6 +831,7 @@ function navigate(tab){
     reports:showDailyReport,
     settings:showSettings,
     audit:showAuditLog,
+    notifications:showNotifications,
   }[tab]||renderDashboard)();
 }
 function navTo(tab){navigate(tab);}
@@ -2158,9 +2171,451 @@ async function createStation(){
 async function toggleStation(id,active){await apiFetch(`/api/super/stations/${id}`,{method:'PUT',body:{isActive:active}});showToast(active?'✓ Activated':'Suspended','success');renderSuperDashboard();}
 async function changePlan(id,cur){const plans=['trial','basic','pro','enterprise'];const next=plans[(plans.indexOf(cur)+1)%plans.length];await apiFetch(`/api/super/stations/${id}`,{method:'PUT',body:{plan:next}});showToast(`✓ Plan → ${next}`,'success');renderSuperDashboard();}
 
+
+// ══════════════════════════════════════════════════════════════════════════
+// SPRINT 4: WhatsApp Alerts & Notifications
+// ══════════════════════════════════════════════════════════════════════════
+
+let waTab = 'setup'; // 'setup' | 'alerts' | 'log'
+
+async function showNotifications() {
+  document.getElementById('mainContent').innerHTML = '<div class="spinner"></div>';
+  const [statsRes, settingsRes] = await Promise.all([
+    apiFetch('/api/notifications/stats'),
+    apiFetch('/api/notifications/settings')
+  ]);
+  const stats = (await statsRes.json()).data || {};
+  const s = (await settingsRes.json()).data || {};
+
+  // Update badge
+  const badge = document.getElementById('notifBadge');
+  if (badge) badge.style.display = stats.failedToday > 0 ? '' : 'none';
+
+  renderNotifPage(s, stats);
+}
+
+function renderNotifPage(s, stats) {
+  const tabs = [
+    { id: 'setup',  icon: '⚙️', label: 'Setup' },
+    { id: 'alerts', icon: '🔔', label: 'Alert Rules' },
+    { id: 'log',    icon: '📋', label: 'Message Log' },
+  ];
+
+  const providerLabels = {
+    twilio: 'Twilio (WhatsApp Business)',
+    meta: 'Meta Cloud API (Free)',
+    ultramsg: 'UltraMsg',
+    webhook: 'Custom Webhook (WATI / Interakt / AiSensy)',
+    simulate: '🧪 Simulate (Dev/Test)',
+  };
+  const currentProvider = s.provider || 'simulate';
+  const provLabel = providerLabels[currentProvider] || currentProvider;
+
+  const waOn = s.wa_enabled;
+  const waNum = s.wa_number || '';
+
+  document.getElementById('mainContent').innerHTML = `
+    <div class="section-title">💬 WhatsApp Alerts</div>
+
+    <!-- Status Card -->
+    <div class="card" style="background:${waOn && s.wa_number ? 'rgba(34,197,94,.08)' : 'rgba(245,158,11,.07)'};border-color:${waOn && s.wa_number ? 'rgba(34,197,94,.3)' : 'rgba(245,158,11,.3)'};margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="font-size:28px">${waOn && s.wa_number ? '✅' : '⚠️'}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:15px">${waOn && s.wa_number ? 'WhatsApp Alerts Active' : 'WhatsApp Not Configured'}</div>
+          <div style="color:var(--text2);font-size:12px;margin-top:2px">
+            Provider: <strong>${provLabel}</strong>
+            ${s.wa_number ? ` · Number: <strong>+${s.wa_number}</strong>` : ' · Set your WhatsApp number below'}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="text-align:center;padding:8px 14px;background:rgba(34,197,94,.12);border-radius:8px">
+            <div style="font-size:18px;font-weight:800;color:var(--green)">${stats.sentToday||0}</div>
+            <div style="font-size:10px;color:var(--text2)">Sent Today</div>
+          </div>
+          <div style="text-align:center;padding:8px 14px;background:rgba(239,68,68,.12);border-radius:8px">
+            <div style="font-size:18px;font-weight:800;color:var(--red)">${stats.failedToday||0}</div>
+            <div style="font-size:10px;color:var(--text2)">Failed Today</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div style="display:flex;gap:6px;margin-bottom:16px">
+      ${tabs.map(t => `<button onclick="waTabSwitch('${t.id}')" id="watab-${t.id}" style="padding:8px 16px;border-radius:8px;border:1px solid var(--border2);background:${waTab===t.id?'var(--accent)':'var(--surface2)'};color:${waTab===t.id?'#000':'var(--text)'};font-weight:600;cursor:pointer;font-size:13px">${t.icon} ${t.label}</button>`).join('')}
+    </div>
+
+    <div id="waTabContent"></div>
+  `;
+
+  renderWaTab(s);
+}
+
+function waTabSwitch(tab) {
+  waTab = tab;
+  document.querySelectorAll('[id^="watab-"]').forEach(b => {
+    const isActive = b.id === 'watab-' + tab;
+    b.style.background = isActive ? 'var(--accent)' : 'var(--surface2)';
+    b.style.color = isActive ? '#000' : 'var(--text)';
+  });
+  apiFetch('/api/notifications/settings').then(r => r.json()).then(d => renderWaTab(d.data || {}));
+}
+
+async function renderWaTab(s) {
+  const el = document.getElementById('waTabContent');
+  if (!el) return;
+
+  if (waTab === 'setup') {
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-title">📱 WhatsApp Configuration</div>
+
+        <div class="form-group" style="margin-top:12px">
+          <label>Owner's WhatsApp Number <span style="color:var(--red)">*</span></label>
+          <div style="position:relative">
+            <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text2);font-size:13px">+91</span>
+            <input id="waNum" type="tel" maxlength="10" placeholder="9876543210" value="${s.wa_number?.replace(/^91/,'') || ''}"
+              style="padding-left:44px" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"/>
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">10-digit Indian mobile number linked to WhatsApp</div>
+        </div>
+
+        <div class="form-group">
+          <label>WhatsApp Provider</label>
+          <div style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:12px;font-size:13px">
+            <div style="color:var(--accent);font-weight:700;margin-bottom:6px">Current: ${s.provider || 'simulate'}</div>
+            <div style="color:var(--text2);font-size:12px;line-height:1.6">
+              Provider is set via <code style="background:var(--surface);padding:1px 5px;border-radius:4px">WHATSAPP_PROVIDER</code> environment variable on your server.<br>
+              Available options:
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+              ${[
+                {id:'simulate', label:'🧪 Simulate', desc:'Dev/test — logs to console', free:true},
+                {id:'twilio', label:'📞 Twilio', desc:'Reliable, ₹6/msg, needs account', free:false},
+                {id:'meta', label:'🔵 Meta Cloud', desc:'Free 1000 msgs/month, official', free:true},
+                {id:'ultramsg', label:'💬 UltraMsg', desc:'₹2/msg, easy setup, India-friendly', free:false},
+                {id:'webhook', label:'🔗 Custom Webhook', desc:'WATI, Interakt, AiSensy, etc.', free:false},
+              ].map(p => `
+                <div style="background:${(s.provider||'simulate')===p.id?'rgba(245,166,35,.15)':'var(--surface)'};border:1px solid ${(s.provider||'simulate')===p.id?'var(--accent)':'var(--border)'};border-radius:8px;padding:10px">
+                  <div style="font-weight:700;font-size:13px">${p.label} ${p.free?'<span style="background:rgba(34,197,94,.2);color:var(--green);font-size:9px;padding:1px 5px;border-radius:4px">FREE</span>':''}</div>
+                  <div style="color:var(--text2);font-size:11px;margin-top:2px">${p.desc}</div>
+                  ${(s.provider||'simulate')===p.id?'<div style="color:var(--accent);font-size:10px;margin-top:4px;font-weight:700">✓ ACTIVE</div>':''}
+                </div>`).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <div onclick="toggleWaEnabled()" id="waToggle" style="width:44px;height:24px;border-radius:12px;background:${s.wa_enabled?'var(--green)':'var(--surface2)'};border:1px solid var(--border2);position:relative;cursor:pointer;transition:background .2s">
+              <div style="position:absolute;top:3px;left:${s.wa_enabled?'22px':'3px'};width:16px;height:16px;border-radius:50%;background:#fff;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
+            </div>
+            <span style="font-weight:600">Enable WhatsApp Alerts</span>
+            <span style="color:${s.wa_enabled?'var(--green)':'var(--text2)'};font-size:12px">${s.wa_enabled?'ON':'OFF'}</span>
+          </label>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="saveWaSetup()" style="flex:1;min-width:140px">💾 Save Settings</button>
+          <button class="btn" onclick="sendWaTest()" style="flex:1;min-width:140px;background:var(--surface2);border:1px solid var(--border2)">🧪 Send Test Message</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">🔧 Setup Guide</div>
+        <div style="font-size:13px;line-height:1.8;color:var(--text2)">
+          ${[
+            {step:'1', title:'Choose Provider', desc:'For Indian stations: <strong>UltraMsg</strong> (cheapest) or <strong>Meta Cloud API</strong> (free). For testing: use Simulate.'},
+            {step:'2', title:'Set Environment Variable', desc:'On your server/Railway, add: <code style="background:var(--surface);padding:2px 6px;border-radius:4px;color:var(--accent)">WHATSAPP_PROVIDER=ultramsg</code>'},
+            {step:'3', title:'Add API Credentials', desc:'Add provider-specific keys (ULTRAMSG_INSTANCE, ULTRAMSG_TOKEN, etc.) as env vars on your server.'},
+            {step:'4', title:'Enter Your Number', desc:'Enter the 10-digit WhatsApp number of the station owner above.'},
+            {step:'5', title:'Test It!', desc:'Click "Send Test Message" — you should receive a WhatsApp message instantly.'},
+          ].map(g => `<div style="display:flex;gap:10px;margin-bottom:8px"><div style="background:var(--accent);color:#000;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0">${g.step}</div><div><strong style="color:var(--text)">${g.title}:</strong> ${g.desc}</div></div>`).join('')}
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">🔑 API Keys Reference</div>
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead><tr><th>Provider</th><th>Environment Variables Needed</th><th>Cost</th></tr></thead>
+            <tbody>
+              <tr><td>🧪 Simulate</td><td><code>WHATSAPP_PROVIDER=simulate</code></td><td>Free</td></tr>
+              <tr><td>📞 Twilio</td><td><code>WHATSAPP_PROVIDER=twilio</code><br><code>TWILIO_ACCOUNT_SID</code><br><code>TWILIO_AUTH_TOKEN</code><br><code>TWILIO_WA_FROM</code> (e.g. whatsapp:+14155238886)</td><td>~₹6/msg</td></tr>
+              <tr><td>🔵 Meta Cloud</td><td><code>WHATSAPP_PROVIDER=meta</code><br><code>META_WA_TOKEN</code><br><code>META_PHONE_ID</code></td><td>Free (1000/mo)</td></tr>
+              <tr><td>💬 UltraMsg</td><td><code>WHATSAPP_PROVIDER=ultramsg</code><br><code>ULTRAMSG_INSTANCE</code><br><code>ULTRAMSG_TOKEN</code></td><td>~₹2/msg</td></tr>
+              <tr><td>🔗 Webhook</td><td><code>WHATSAPP_PROVIDER=webhook</code><br><code>WA_WEBHOOK_URL</code><br><code>WA_WEBHOOK_API_KEY</code></td><td>Provider-dependent</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+
+  } else if (waTab === 'alerts') {
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-title">⛽ Low Fuel Stock Alert</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Sends a WhatsApp alert when any tank falls below the threshold. Maximum 1 alert per 4 hours.</div>
+
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;cursor:pointer">
+          <input type="checkbox" id="lowStockEnabled" ${s.low_stock_enabled?'checked':''} style="width:16px;height:16px;accent-color:var(--accent)">
+          <span style="font-weight:600">Enable Low Stock Alert</span>
+        </label>
+
+        <div class="form-group">
+          <label>Alert Threshold (Litres)</label>
+          <input type="number" id="lowStockThresh" value="${s.low_stock_threshold||2000}" min="100" max="50000" step="100" placeholder="2000"/>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Alert fires when stock drops below this level. Leave blank to use each tank's own min_alert setting.</div>
+        </div>
+
+        <div class="card" style="background:rgba(245,158,11,.07);border-color:rgba(245,158,11,.2);margin-top:8px">
+          <div style="font-size:12px;color:var(--text)">
+            <strong>📋 Example Message:</strong><br>
+            <code style="color:var(--text2);font-size:11px;line-height:1.8">
+              ⚠️ LOW FUEL ALERT<br>
+              🏪 Demo Fuel Station<br>
+              ⛽ MS Tank 1 (MS)<br>
+              📉 Stock: 1,800L<br>
+              🚨 Threshold: 2,000L<br>
+              Please arrange refill immediately.
+            </code>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">📊 Day Close Summary</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Auto-sends a WhatsApp summary when the last shift of the day is closed.</div>
+
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;cursor:pointer">
+          <input type="checkbox" id="dayCloseEnabled" ${s.day_close_enabled?'checked':''} style="width:16px;height:16px;accent-color:var(--accent)">
+          <span style="font-weight:600">Enable Day Close Summary</span>
+        </label>
+
+        <div class="card" style="background:rgba(34,197,94,.05);border-color:rgba(34,197,94,.2);margin-top:8px">
+          <div style="font-size:12px;color:var(--text)">
+            <strong>📋 Example Message:</strong><br>
+            <code style="color:var(--text2);font-size:11px;line-height:1.8">
+              📊 DAILY SUMMARY — 2025-03-07<br>
+              🏪 Demo Fuel Station<br><br>
+              💰 Revenue: ₹1,24,500<br>
+              ⛽ Litres: 1,245.5L<br>
+              🔢 Transactions: 87<br><br>
+              💵 Cash: ₹48,200<br>
+              📱 UPI: ₹62,300<br>
+              💳 Card: ₹8,500<br>
+              🏢 Credit: ₹5,500
+            </code>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <button class="btn" onclick="sendManualDayReport()" style="background:var(--surface2);border:1px solid var(--border2);font-size:13px">📤 Send Today's Report Now</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">💳 Credit Payment Reminders</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Auto-sends reminder to credit customers with overdue balances. Runs daily at 9:00 AM. Only customers with a saved mobile number receive reminders.</div>
+
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;cursor:pointer">
+          <input type="checkbox" id="creditReminderEnabled" ${s.credit_reminder_enabled?'checked':''} style="width:16px;height:16px;accent-color:var(--accent)">
+          <span style="font-weight:600">Enable Credit Reminders</span>
+        </label>
+
+        <div class="form-group">
+          <label>Send Reminder When Overdue By (Days)</label>
+          <input type="number" id="creditReminderDays" value="${s.credit_reminder_days||30}" min="1" max="365"/>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+          <button class="btn" onclick="sendCreditRemindersNow()" style="background:var(--surface2);border:1px solid var(--border2);font-size:13px;flex:1">📤 Send Reminders Now</button>
+        </div>
+
+        <div class="card" style="background:rgba(59,130,246,.05);border-color:rgba(59,130,246,.2);margin-top:12px">
+          <div style="font-size:12px;color:var(--text)">
+            <strong>📋 Example Message:</strong><br>
+            <code style="color:var(--text2);font-size:11px;line-height:1.8">
+              💳 PAYMENT REMINDER<br>
+              🏪 Demo Fuel Station<br>
+              🏢 Dear ABC Transport,<br><br>
+              Your fuel credit outstanding:<br>
+              ₹24,500<br>
+              Overdue by 45 days<br><br>
+              Please settle at earliest.<br>
+              📞 9876543210
+            </code>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px">
+        <button class="btn btn-primary" onclick="saveWaAlerts()" style="width:100%;padding:14px">💾 Save Alert Settings</button>
+      </div>`;
+
+  } else if (waTab === 'log') {
+    el.innerHTML = '<div class="spinner"></div>';
+    const logRes = await apiFetch('/api/notifications/log?limit=50');
+    const logs = (await logRes.json()).data || [];
+
+    const typeColors = {
+      test: 'var(--text2)', low_stock: 'var(--red)', day_close: 'var(--green)',
+      credit_reminder: 'var(--accent)', manual: 'var(--green)'
+    };
+    const typeIcons = {
+      test:'🧪', low_stock:'⛽', day_close:'📊', credit_reminder:'💳', manual:'📤'
+    };
+
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:13px;color:var(--text2)">Last 50 messages</div>
+        <div style="display:flex;gap:6px">
+          ${['all','low_stock','day_close','credit_reminder','test'].map(t =>
+            `<button onclick="filterWaLog('${t}')" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border2);background:var(--surface2);color:var(--text2);font-size:11px;cursor:pointer">${t==='all'?'All':t.replace('_',' ')}</button>`
+          ).join('')}
+        </div>
+      </div>
+      <div id="waLogList">
+      ${!logs.length ? `<div class="empty"><div class="empty-icon">💬</div>No messages sent yet.<br><span style="font-size:13px">Configure WhatsApp and send a test message to get started.</span></div>` :
+        logs.map(l => `
+          <div class="card" style="padding:12px;margin-bottom:8px;border-left:3px solid ${l.status==='sent'?'var(--green)':'var(--red)'}" data-type="${l.type}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <div style="flex:1">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                  <span style="font-size:16px">${typeIcons[l.type]||'📨'}</span>
+                  <span style="font-weight:700;font-size:13px;color:${typeColors[l.type]||'var(--text)'}">${(l.type||'').replace('_',' ').toUpperCase()}</span>
+                  <span class="badge" style="background:${l.status==='sent'?'rgba(34,197,94,.15)':'rgba(239,68,68,.15)'};color:${l.status==='sent'?'var(--green)':'var(--red)'};font-size:10px">${l.status}</span>
+                  <span style="font-size:10px;color:var(--text2);margin-left:4px">${l.provider||''}</span>
+                </div>
+                <div style="font-size:12px;color:var(--text2)">To: +${l.recipient||'—'}</div>
+                ${l.error_msg?`<div style="font-size:11px;color:var(--red);margin-top:2px">⚠️ ${l.error_msg}</div>`:''}
+                <details style="margin-top:6px">
+                  <summary style="font-size:11px;color:var(--text2);cursor:pointer">View message</summary>
+                  <pre style="font-size:11px;color:var(--text2);margin-top:6px;white-space:pre-wrap;background:var(--surface);padding:8px;border-radius:6px;max-height:120px;overflow-y:auto">${(l.message||'').slice(0,400)}</pre>
+                </details>
+              </div>
+              <div style="font-size:11px;color:var(--text2);white-space:nowrap;text-align:right">
+                ${new Date(l.sent_at).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true})}
+              </div>
+            </div>
+          </div>`).join('')
+      }
+      </div>`;
+  }
+}
+
+function filterWaLog(type) {
+  document.querySelectorAll('#waLogList [data-type]').forEach(el => {
+    el.style.display = (type === 'all' || el.dataset.type === type) ? '' : 'none';
+  });
+}
+
+let _waEnabled = null;
+function toggleWaEnabled() {
+  const toggle = document.getElementById('waToggle');
+  if (!toggle) return;
+  _waEnabled = _waEnabled === null ? !parseInt(toggle.dataset.state || '0') : !_waEnabled;
+  const thumb = toggle.children[0];
+  toggle.style.background = _waEnabled ? 'var(--green)' : 'var(--surface2)';
+  thumb.style.left = _waEnabled ? '22px' : '3px';
+  toggle.dataset.state = _waEnabled ? '1' : '0';
+  toggle.nextElementSibling.nextElementSibling.textContent = _waEnabled ? 'ON' : 'OFF';
+  toggle.nextElementSibling.nextElementSibling.style.color = _waEnabled ? 'var(--green)' : 'var(--text2)';
+}
+
+async function saveWaSetup() {
+  const numInput = document.getElementById('waNum');
+  const num = (numInput?.value || '').replace(/\D/g,'');
+  if (num && num.length !== 10) return showToast('Enter valid 10-digit mobile number', 'error');
+
+  const toggle = document.getElementById('waToggle');
+  const enabled = toggle ? (toggle.dataset.state === '1' || toggle.style.background.includes('34,197')) : null;
+
+  const body = {};
+  if (num) body.waNumber = '91' + num;
+  if (enabled !== null) body.waEnabled = enabled;
+
+  const res = await apiFetch('/api/notifications/settings', { method: 'PUT', body });
+  const data = await res.json();
+  if (!res.ok) return showToast(data.error || 'Save failed', 'error');
+  showToast('✓ Settings saved', 'success');
+  showNotifications();
+}
+
+async function saveWaAlerts() {
+  const body = {
+    lowStockEnabled: document.getElementById('lowStockEnabled')?.checked,
+    dayCloseEnabled: document.getElementById('dayCloseEnabled')?.checked,
+    creditReminderEnabled: document.getElementById('creditReminderEnabled')?.checked,
+  };
+  const lsThresh = document.getElementById('lowStockThresh')?.value;
+  const crDays = document.getElementById('creditReminderDays')?.value;
+  if (lsThresh) body.lowStockThreshold = parseFloat(lsThresh);
+  if (crDays) body.creditReminderDays = parseInt(crDays);
+
+  const res = await apiFetch('/api/notifications/settings', { method: 'PUT', body });
+  const data = await res.json();
+  if (!res.ok) return showToast(data.error || 'Save failed', 'error');
+  showToast('✓ Alert settings saved', 'success');
+}
+
+async function sendWaTest() {
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sending...'; }
+  try {
+    const res = await apiFetch('/api/notifications/test', { method: 'POST', body: {} });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Send failed');
+    showToast(`✓ Test sent via ${data.provider}!`, 'success');
+  } catch(e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🧪 Send Test Message'; }
+  }
+}
+
+async function sendManualDayReport() {
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sending...'; }
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const res = await apiFetch('/api/notifications/send-day-report', { method: 'POST', body: { date: today } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Send failed');
+    showToast(`✓ Day report sent!`, 'success');
+  } catch(e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Send Today\'s Report Now'; }
+  }
+}
+
+async function sendCreditRemindersNow() {
+  const btn = event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sending...'; }
+  const crDays = parseInt(document.getElementById('creditReminderDays')?.value) || 30;
+  try {
+    const res = await apiFetch('/api/notifications/send-credit-reminders', { method: 'POST', body: { overdueDays: crDays } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed');
+    showToast(`✓ ${data.sent} reminders sent${data.failed?`, ${data.failed} failed`:''}`, data.sent>0?'success':'error');
+  } catch(e) {
+    showToast('❌ ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Send Reminders Now'; }
+  }
+}
+
+
 // ── Utilities ─────────────────────────────────────────────────────────────
 function fmt(n){return (n||0).toLocaleString('en-IN',{maximumFractionDigits:2});}
 function payIcon(m){return {cash:'💵',phonepe:'📱',gpay:'🟢',paytm:'🔵',card:'💳',credit:'📋',neft:'🏦'}[m]||'💳';}
+function refreshNotifBadge(){
+  apiFetch('/api/notifications/stats').then(r=>r.json()).then(d=>{
+    const b=document.getElementById('notifBadge');
+    if(b) b.style.display=(d.data?.failedToday>0)?'':'none';
+  }).catch(()=>{});
+}
 function showToast(msg,type='success'){const t=document.getElementById('toast');t.textContent=msg;t.className=`toast ${type} show`;setTimeout(()=>t.classList.remove('show'),3000);}
 </script>
 </body>

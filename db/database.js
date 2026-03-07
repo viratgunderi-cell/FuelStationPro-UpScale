@@ -281,6 +281,36 @@ async function initSchema() {
     `CREATE INDEX IF NOT EXISTS idx_attendance_emp ON attendance(employee_id, work_date)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_station ON payroll_runs(station_id)`,
     `CREATE INDEX IF NOT EXISTS idx_advances_emp ON salary_advances(employee_id)`,
+
+    // ── SPRINT 4: NOTIFICATION SETTINGS ──────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS notification_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL UNIQUE REFERENCES stations(id) ON DELETE CASCADE,
+      wa_enabled INTEGER NOT NULL DEFAULT 0,
+      wa_number TEXT,
+      wa_provider TEXT NOT NULL DEFAULT 'simulate',
+      low_stock_enabled INTEGER NOT NULL DEFAULT 1,
+      low_stock_threshold REAL,
+      day_close_enabled INTEGER NOT NULL DEFAULT 1,
+      day_close_time TEXT NOT NULL DEFAULT '22:00',
+      credit_reminder_enabled INTEGER NOT NULL DEFAULT 1,
+      credit_reminder_days INTEGER NOT NULL DEFAULT 30,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    // ── SPRINT 4: NOTIFICATION LOG ────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS notification_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      recipient TEXT,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'sent',
+      error_msg TEXT,
+      provider TEXT,
+      meta TEXT,
+      sent_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_notif_log_station ON notification_log(station_id, sent_at)`,
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sales_station ON sales(station_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sales_time ON sales(sale_time)`,
