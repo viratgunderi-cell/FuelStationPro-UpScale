@@ -197,3 +197,73 @@ router.get('/settings/audit', authorize('owner','manager'), async (req, res) => 
 });
 
 module.exports = router;
+
+// ── SPRINT 1: Enhanced Reports ────────────────────────────────────────────
+
+// Stock Movement: opening → purchases → sales → closing per tank per date range
+router.get('/reports/stock-movement', async (req, res) => {
+  const sid = req.user.stationId;
+  const date = req.query.date || new Date().toISOString().slice(0,10);
+  const tanks = await db.all('SELECT * FROM tanks WHERE station_id=? AND is_active=1', [sid]);
+  const movements = await Promise.all(tanks.map(async t => {
+    const sales = await db.get(`SELECT COALESCE(SUM(quantity),0) as sold FROM sales WHERE station_id=? AND tank_id=? AND date(sale_time)=? AND is_cancelled=0`, [sid, t.id, date]);
+    const purchases = await db.get(`SELECT COALESCE(SUM(quantity),0) as received FROM purchases WHERE station_id=? AND tank_id=? AND purchase_date=?`, [sid, t.id, date]);
+    const sold = sales.sold || 0;
+    const received = purchases.received || 0;
+    const opening = t.current_stock + sold - received;
+    const closing = t.current_stock;
+    const variance = (opening + received - sold) - closing;
+    return { tankId: t.id, tankName: t.tank_name, fuelType: t.fuel_type, capacity: t.capacity, opening: Math.max(0, opening), received, sold, closing, variance };
+  }));
+  res.json({ success: true, data: { date, movements } });
+});
+
+// Enhanced daily report with nozzle-wise breakdown
+router.get('/reports/daily-enhanced', async (req, res) => {
+  const sid = req.user.stationId;
+  const date = req.query.date || new Date().toISOString().slice(0,10);
+  const [fuelWise, paymentWise, shiftWise, hourly, nozzleWise, totals] = await Promise.all([
+    db.all(`SELECT fuel_type,COUNT(*) as txns,ROUND(SUM(quantity),2) as qty,ROUND(SUM(total_amount),2) as amount FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0 GROUP BY fuel_type`, [sid,date]),
+    db.all(`SELECT payment_mode,COUNT(*) as txns,ROUND(SUM(total_amount),2) as amount FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0 GROUP BY payment_mode`, [sid,date]),
+    db.all(`SELECT sh.shift_name,sh.open_time,sh.close_time,sh.total_sales,sh.cash_collected,sh.upi_collected,sh.card_collected,sh.credit_sales,sh.cash_physical,sh.cash_variance,u.full_name as opened_by FROM shifts sh LEFT JOIN users u ON u.id=sh.opened_by WHERE sh.station_id=? AND date(sh.open_time)=?`, [sid,date]),
+    db.all(`SELECT strftime('%H',sale_time) as hr,COUNT(*) as txns,ROUND(SUM(total_amount),2) as amount FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0 GROUP BY hr ORDER BY hr`, [sid,date]),
+    db.all(`SELECT n.nozzle_name,s.fuel_type,COUNT(*) as txns,ROUND(SUM(s.quantity),2) as qty,ROUND(SUM(s.total_amount),2) as amount FROM sales s LEFT JOIN nozzles n ON n.id=s.nozzle_id WHERE s.station_id=? AND date(s.sale_time)=? AND s.is_cancelled=0 GROUP BY s.nozzle_id ORDER BY n.nozzle_name`, [sid,date]),
+    db.get(`SELECT COUNT(*) as txns, ROUND(SUM(total_amount),2) as revenue, ROUND(SUM(quantity),2) as litres FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0`, [sid,date])
+  ]);
+  res.json({ success: true, data: { date, fuelWise, paymentWise, shiftWise, hourly, nozzleWise, totals } });
+});
+
+// Credit customers with overdue info
+router.get('/customers/outstanding', async (req, res) => {
+  const sid = req.user.stationId;
+  const data = await db.all(`
+    SELECT c.*,
+      (SELECT MAX(payment_date) FROM credit_payments WHERE customer_id=c.id AND station_id=c.station_id) as last_payment_date,
+      (SELECT COUNT(*) FROM sales WHERE customer_id=c.id AND station_id=c.station_id AND date(sale_time)>=date('now','-30 days') AND is_cancelled=0) as sales_30d
+    FROM credit_customers c
+    WHERE c.station_id=? AND c.is_active=1
+    ORDER BY c.outstanding DESC`, [sid]);
+  const today = new Date();
+  const result = data.map(c => {
+    let daysOverdue = 0;
+    if (c.last_payment_date) {
+      daysOverdue = Math.floor((today - new Date(c.last_payment_date)) / 86400000);
+    } else if (c.outstanding > 0) {
+      daysOverdue = 999;
+    }
+    const cycleLimit = c.billing_cycle === 'weekly' ? 7 : c.billing_cycle === 'fortnightly' ? 14 : 30;
+    return { ...c, daysOverdue, isOverdue: daysOverdue > cycleLimit && c.outstanding > 0, cycleLimit };
+  });
+  res.json({ success: true, data: result });
+});
+
+// 7-day trend for dashboard chart
+router.get('/reports/trend', async (req, res) => {
+  const sid = req.user.stationId;
+  const [daily, fuelSplit, paymentSplit] = await Promise.all([
+    db.all(`SELECT date(sale_time) as d, ROUND(SUM(total_amount),2) as rev, ROUND(SUM(quantity),2) as litres, COUNT(*) as txns FROM sales WHERE station_id=? AND date(sale_time)>=date('now','-6 days') AND is_cancelled=0 GROUP BY d ORDER BY d`, [sid]),
+    db.all(`SELECT fuel_type, ROUND(SUM(total_amount),2) as amount FROM sales WHERE station_id=? AND date(sale_time)>=date('now','-6 days') AND is_cancelled=0 GROUP BY fuel_type`, [sid]),
+    db.all(`SELECT payment_mode, ROUND(SUM(total_amount),2) as amount FROM sales WHERE station_id=? AND date(sale_time)>=date('now','-6 days') AND is_cancelled=0 GROUP BY payment_mode`, [sid])
+  ]);
+  res.json({ success: true, data: { daily, fuelSplit, paymentSplit } });
+});
