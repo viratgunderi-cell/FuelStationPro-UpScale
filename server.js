@@ -41,6 +41,7 @@ app.use('/api/auth',    require('./routes/auth'));
 app.use('/api/sales',   require('./routes/sales'));
 app.use('/api/shifts',  require('./routes/shifts'));
 app.use('/api/super',   require('./routes/super'));
+app.use('/api/payroll', require('./routes/payroll'));
 app.use('/api',         require('./routes/api'));
 
 // ── Health ─────────────────────────────────────────────────────────────────

@@ -37,6 +37,14 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .btn-secondary{background:var(--accent2);color:#fff}
 .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
 .btn-sm{padding:8px 14px;font-size:12px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-family:inherit;width:auto}
+/* ATTENDANCE BUTTONS */
+.att-btn{padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--muted);cursor:pointer;font-size:11px;font-weight:600;transition:.15s;font-family:inherit}
+.att-btn:hover{border-color:var(--accent);color:var(--text)}
+.att-active-present{background:rgba(34,197,94,.15)!important;border-color:var(--green)!important;color:var(--green)!important}
+.att-active-absent{background:rgba(239,68,68,.15)!important;border-color:var(--red)!important;color:#fca5a5!important}
+.att-active-half_day{background:rgba(234,179,8,.15)!important;border-color:var(--yellow)!important;color:var(--yellow)!important}
+.att-active-leave{background:rgba(59,130,246,.15)!important;border-color:var(--accent2)!important;color:#93c5fd!important}
+.att-active-holiday{background:rgba(249,115,22,.15)!important;border-color:var(--accent)!important;color:var(--accent)!important}
 .btn-pdf{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
 .btn-pdf:hover{background:rgba(239,68,68,.25)}
 .btn-excel{background:rgba(34,197,94,.15);color:#86efac;border:1px solid rgba(34,197,94,.3)}
@@ -593,7 +601,7 @@ function renderMore(){
       {icon:'📊',title:'Daily Sales Report',sub:'Date picker · Fuel-wise · Nozzle-wise · PDF export',fn:"showDailyReport()"},
       {icon:'💳',title:'Credit Customers',sub:'Overdue flags · Statements · Payments',fn:"showCustomers()"},
       {icon:'📱',title:'UPI Reconciliation',sub:'PhonePe · GPay · Paytm vs bank',fn:"showUPIReport()"},
-      {icon:'👷',title:'Employees',sub:'Manage staff',fn:"showEmployees()"},
+      {icon:'👷',title:'Payroll & Attendance',sub:'Attendance · Salary · Advances · Performance',fn:"showPayrollHub()"},
       {icon:'⚙️',title:'Settings',sub:'Prices · Users · Station config',fn:"showSettings()"},
       {icon:'📋',title:'Audit Log',sub:'Full activity history',fn:"showAuditLog()"},
     ].map(m=>`<div class="list-item" onclick="${m.fn}" style="cursor:pointer"><div style="font-size:24px;margin-right:12px;flex-shrink:0">${m.icon}</div><div class="list-item-left"><div class="list-item-title">${m.title}</div><div class="list-item-sub">${m.sub}</div></div><div style="color:var(--muted);font-size:18px">›</div></div>`).join('')}`;
@@ -848,16 +856,589 @@ function calcReconDiff(){
 }
 
 // ── EMPLOYEES ─────────────────────────────────────────────────────────────
-async function showEmployees(){
+// ══════════════════════════════════════════════════════════════════════════
+// SPRINT 2: PAYROLL HUB
+// ══════════════════════════════════════════════════════════════════════════
+let _payMonth = new Date().getMonth()+1;
+let _payYear  = new Date().getFullYear();
+
+function showPayrollHub(){
+  document.getElementById('mainContent').innerHTML=`
+    <button class="back-btn" onclick="renderMore()">← Back</button>
+    <div class="section-title">👷 Payroll & Attendance</div>
+    ${[
+      {icon:'🗓️',title:'Mark Attendance',sub:'Daily attendance for all employees',fn:'showAttendanceMarker()'},
+      {icon:'📅',title:'Attendance Register',sub:'Monthly calendar view per employee',fn:'showAttendanceRegister()'},
+      {icon:'💰',title:'Run Payroll',sub:'Calculate & generate salary slips',fn:'showPayrollRun()'},
+      {icon:'💸',title:'Salary Advances',sub:'Record & track advance payments',fn:'showAdvances()'},
+      {icon:'📈',title:'Performance Report',sub:'Employee rankings & metrics',fn:'showPerformance()'},
+      {icon:'👤',title:'Manage Employees',sub:'Add & update staff',fn:'showEmployeesList()'},
+    ].map(m=>`<div class="list-item" onclick="${m.fn}" style="cursor:pointer"><div style="font-size:24px;margin-right:12px;flex-shrink:0">${m.icon}</div><div class="list-item-left"><div class="list-item-title">${m.title}</div><div class="list-item-sub">${m.sub}</div></div><div style="color:var(--muted);font-size:18px">›</div></div>`).join('')}`;
+}
+
+// ── ATTENDANCE MARKER (daily bulk mark) ───────────────────────────────────
+async function showAttendanceMarker(dateVal){
+  const today=new Date().toISOString().slice(0,10);
+  const date=dateVal||today;
+  const [empRes,attRes]=await Promise.all([apiFetch('/api/employees'),apiFetch(`/api/payroll/attendance?month=${date.slice(5,7)}&year=${date.slice(0,4)}`)]);
+  const emps=(await empRes.json()).data||[];
+  const att=(await attRes.json()).data||[];
+  const attMap={};
+  att.filter(a=>a.work_date===date).forEach(a=>{attMap[a.employee_id]=a;});
+  const c=document.getElementById('mainContent');
+  c.innerHTML=`
+    <button class="back-btn" onclick="showPayrollHub()">← Back</button>
+    <div class="section-title">🗓️ Mark Attendance</div>
+    <div class="report-toolbar">
+      <div class="form-group"><label>Date</label><input type="date" id="attDate" value="${date}" max="${today}" onchange="showAttendanceMarker(this.value)"/></div>
+      <div style="align-self:flex-end"><button class="btn-sm btn-primary" style="background:var(--accent);color:#fff;border:none" onclick="saveAllAttendance('${date}')">Save All</button></div>
+    </div>
+    ${!emps.length?`<div class="empty"><div class="empty-icon">👷</div>No employees. <a onclick="showEmployeesList()" style="color:var(--accent);cursor:pointer">Add employees first →</a></div>`:''}
+    <div id="attList">
+    ${emps.map(e=>{
+      const a=attMap[e.id];
+      const st=a?.status||'present';
+      return `<div class="card" style="padding:12px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:34px;height:34px;background:var(--accent2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">${(e.full_name||'?')[0]}</div>
+            <div><div style="font-weight:600;font-size:14px">${e.full_name}</div><div style="font-size:11px;color:var(--muted)">${e.role} · ₹${fmt(e.salary)}/mo</div></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${['present','absent','half_day','leave','holiday'].map(s=>`<button onclick="setAttStatus(this,'${e.id}','${s}')" class="att-btn ${st===s?'att-active-'+s:''}" data-emp="${e.id}" data-status="${s}">${{present:'✅ Present',absent:'❌ Absent',half_day:'½ Half Day',leave:'📤 Leave',holiday:'🎉 Holiday'}[s]}</button>`).join('')}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <div style="flex:1"><label style="font-size:10px;color:var(--muted);display:block;margin-bottom:3px">OT Hours</label><input type="number" id="ot_${e.id}" value="${a?.overtime_hours||0}" min="0" max="12" step="0.5" style="width:100%;padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px"/></div>
+          <div style="flex:2"><label style="font-size:10px;color:var(--muted);display:block;margin-bottom:3px">Notes</label><input type="text" id="note_${e.id}" value="${a?.notes||''}" placeholder="Optional" style="width:100%;padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px"/></div>
+        </div>
+      </div>`;
+    }).join('')}
+    </div>
+    ${emps.length?`<button class="btn btn-primary" onclick="saveAllAttendance('${date}')">💾 Save Attendance for ${new Date(date+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'})}</button>`:''}`;
+  window._attEmps=emps; window._attDate=date;
+}
+
+function setAttStatus(btn,empId,status){
+  const statuses=['present','absent','half_day','leave','holiday'];
+  const colors={present:'var(--green)',absent:'var(--red)',half_day:'var(--yellow)',leave:'var(--accent2)',holiday:'var(--accent)'};
+  document.querySelectorAll(`[data-emp="${empId}"]`).forEach(b=>{
+    b.style.background='var(--surface2)'; b.style.borderColor='var(--border)'; b.style.color='var(--muted)';
+    b.dataset.active='false';
+  });
+  btn.style.background=`rgba(${colors[status].replace('var(--','').replace(')','')},0.15)`;
+  btn.style.borderColor=colors[status]; btn.style.color=colors[status]; btn.dataset.active='true';
+  btn.dataset.status=status;
+  // store selection
+  if(!window._attSelections) window._attSelections={};
+  window._attSelections[empId]=status;
+}
+
+async function saveAllAttendance(date){
+  const emps=window._attEmps||[];
+  if(!emps.length) return showToast('No employees','error');
+  const records=emps.map(e=>{
+    const sel=window._attSelections?.[e.id];
+    const btns=document.querySelectorAll(`[data-emp="${e.id}"][data-active="true"]`);
+    const status=btns[0]?.dataset.status||sel||'present';
+    const ot=parseFloat(document.getElementById('ot_'+e.id)?.value||0);
+    const notes=document.getElementById('note_'+e.id)?.value||'';
+    return {employeeId:e.id,status,overtimeHours:ot,hoursWorked:status==='half_day'?4:status==='present'?8:0,notes};
+  });
+  const res=await apiFetch('/api/payroll/attendance/bulk',{method:'POST',body:{workDate:date,records}});
+  const data=await res.json();
+  if(!res.ok) return showToast(data.error||'Error saving','error');
+  showToast(`✓ ${data.saved} attendance records saved`,'success');
+  window._attSelections={};
+}
+
+// ── ATTENDANCE REGISTER (monthly calendar) ────────────────────────────────
+async function showAttendanceRegister(empId){
+  const now=new Date(); const m=_payMonth, y=_payYear;
+  const [empRes,sumRes]=await Promise.all([apiFetch('/api/employees'),apiFetch(`/api/payroll/attendance/summary?month=${m}&year=${y}`)]);
+  const emps=(await empRes.json()).data||[];
+  const summary=(await sumRes.json()).data||[];
+  const sel=empId||emps[0]?.id;
+  if(!sel){
+    document.getElementById('mainContent').innerHTML=`<button class="back-btn" onclick="showPayrollHub()">← Back</button><div class="empty"><div class="empty-icon">👷</div>No employees found</div>`;
+    return;
+  }
+  // Get detailed attendance for selected employee
+  const attRes=await apiFetch(`/api/payroll/attendance?month=${m}&year=${y}&employeeId=${sel}`);
+  const attData=(await attRes.json()).data||[];
+  const attMap={};
+  attData.forEach(a=>{attMap[a.work_date]=a;});
+  const emp=emps.find(e=>e.id==sel)||emps[0];
+  const empSum=summary.find(s=>s.id==sel)||{present:0,absent:0,half:0,leave:0,overtime:0};
+
+  // Build calendar
+  const daysInMonth=new Date(y,m,0).getDate();
+  const firstDay=new Date(y,m-1,1).getDay();
+  const monthName=new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
+
+  const statusColors={present:'rgba(34,197,94,.3)',absent:'rgba(239,68,68,.3)',half_day:'rgba(234,179,8,.3)',leave:'rgba(59,130,246,.3)',holiday:'rgba(249,115,22,.3)'};
+  const statusLabels={present:'P',absent:'A',half_day:'H',leave:'L',holiday:'HOL'};
+
+  let calRows='';
+  let dayCount=1, cells='';
+  for(let i=0;i<firstDay;i++) cells+=`<td></td>`;
+  while(dayCount<=daysInMonth){
+    const dateStr=`${y}-${String(m).padStart(2,'0')}-${String(dayCount).padStart(2,'0')}`;
+    const a=attMap[dateStr];
+    const bg=a?statusColors[a.status]:'transparent';
+    const lbl=a?statusLabels[a.status]:'';
+    cells+=`<td style="padding:6px 4px;text-align:center;background:${bg};border-radius:6px;cursor:pointer" onclick="quickMarkAtt(${sel},'${dateStr}')">
+      <div style="font-size:12px;font-weight:600">${dayCount}</div>
+      <div style="font-size:9px;font-weight:700;color:${a?'var(--text)':'var(--muted)'}">${lbl}</div>
+    </td>`;
+    if((firstDay+dayCount)%7===0||dayCount===daysInMonth){
+      if(dayCount===daysInMonth){const rem=7-(firstDay+dayCount)%7;if(rem<7)for(let x=0;x<rem;x++)cells+=`<td></td>`;}
+      calRows+=`<tr>${cells}</tr>`; cells='';
+    }
+    dayCount++;
+  }
+
+  document.getElementById('mainContent').innerHTML=`
+    <button class="back-btn" onclick="showPayrollHub()">← Back</button>
+    <div class="section-title">📅 Attendance Register</div>
+    <!-- Month picker -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <button onclick="changePayMonth(-1)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:8px;cursor:pointer">‹</button>
+      <span style="font-weight:700;font-size:15px;flex:1;text-align:center">${monthName}</span>
+      <button onclick="changePayMonth(1)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:8px;cursor:pointer">›</button>
+    </div>
+    <!-- Employee selector -->
+    <div class="form-group" style="margin-bottom:12px"><label>Employee</label>
+      <select onchange="showAttendanceRegister(this.value)">
+        ${emps.map(e=>`<option value="${e.id}" ${e.id==sel?'selected':''}>${e.full_name} (${e.role})</option>`).join('')}
+      </select>
+    </div>
+    <!-- Summary strip -->
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:12px">
+      ${[['✅','Present',empSum.present,'var(--green)'],['❌','Absent',empSum.absent,'var(--red)'],['½','Half Day',empSum.half,'var(--yellow)'],['📤','Leave',empSum.leave,'var(--accent2)'],['⏱️','OT Hrs',empSum.overtime||0,'var(--accent)']].map(([ic,lb,v,c])=>`<div class="sum-box"><div class="sum-val" style="color:${c};font-size:16px">${v}</div><div class="sum-lbl">${lb}</div></div>`).join('')}
+    </div>
+    <!-- Calendar -->
+    <div class="card" style="padding:12px;overflow-x:auto">
+      <table style="width:100%;border-collapse:separate;border-spacing:3px">
+        <thead><tr>${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<th style="font-size:11px;color:var(--muted);padding:4px;text-align:center">${d}</th>`).join('')}</tr></thead>
+        <tbody>${calRows}</tbody>
+      </table>
+    </div>
+    <!-- Legend -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:8px">
+      <span style="background:rgba(34,197,94,.3);padding:2px 8px;border-radius:4px">P = Present</span>
+      <span style="background:rgba(239,68,68,.3);padding:2px 8px;border-radius:4px">A = Absent</span>
+      <span style="background:rgba(234,179,8,.3);padding:2px 8px;border-radius:4px">H = Half Day</span>
+      <span style="background:rgba(59,130,246,.3);padding:2px 8px;border-radius:4px">L = Leave</span>
+      <span style="background:rgba(249,115,22,.3);padding:2px 8px;border-radius:4px">HOL = Holiday</span>
+    </div>
+    <div style="margin-top:8px;font-size:12px;color:var(--muted)">Tap any date to update attendance</div>`;
+  window._regEmpId=sel; window._regEmps=emps;
+}
+
+async function quickMarkAtt(empId, dateStr){
+  const statuses=['present','absent','half_day','leave','holiday'];
+  const labels={present:'Present',absent:'Absent',half_day:'Half Day',leave:'Leave',holiday:'Holiday'};
+  const choice=statuses[(statuses.indexOf(window._lastAttStatus||'present')+1)%statuses.length];
+  window._lastAttStatus=choice;
+  const res=await apiFetch('/api/payroll/attendance',{method:'POST',body:{employeeId:empId,workDate:dateStr,status:choice}});
+  const data=await res.json();
+  if(res.ok){ showToast(`${dateStr}: ${labels[choice]}`,'success'); showAttendanceRegister(empId); }
+  else showToast(data.error,'error');
+}
+
+function changePayMonth(delta){
+  _payMonth+=delta;
+  if(_payMonth>12){_payMonth=1;_payYear++;}
+  if(_payMonth<1){_payMonth=12;_payYear--;}
+  showAttendanceRegister(window._regEmpId);
+}
+
+// ── PAYROLL RUN ───────────────────────────────────────────────────────────
+async function showPayrollRun(mVal,yVal){
+  const m=mVal||_payMonth, y=yVal||_payYear;
+  const [sumRes,payRes]=await Promise.all([
+    apiFetch(`/api/payroll/attendance/summary?month=${m}&year=${y}`),
+    apiFetch(`/api/payroll/payroll?month=${m}&year=${y}`)
+  ]);
+  const summary=(await sumRes.json()).data||[];
+  const payrolls=(await payRes.json()).data||[];
+  const payMap={};
+  payrolls.forEach(p=>{payMap[p.employee_id]=p;});
+  const monthName=new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
+  const totalNet=payrolls.reduce((a,p)=>a+(p.net_salary||0),0);
+  const paidCount=payrolls.filter(p=>p.status==='paid').length;
+
+  document.getElementById('mainContent').innerHTML=`
+    <button class="back-btn" onclick="showPayrollHub()">← Back</button>
+    <div class="section-title">💰 Payroll — ${monthName}</div>
+    <!-- Month nav -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <button onclick="showPayrollRun(${m===1?12:m-1},${m===1?y-1:y})" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:8px;cursor:pointer">‹ Prev</button>
+      <span style="font-weight:700;flex:1;text-align:center">${monthName}</span>
+      <button onclick="showPayrollRun(${m===12?1:m+1},${m===12?y+1:y})" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:8px;cursor:pointer">Next ›</button>
+    </div>
+    <div class="summary-strip" style="grid-template-columns:repeat(3,1fr)">
+      <div class="sum-box"><div class="sum-val">${summary.length}</div><div class="sum-lbl">Employees</div></div>
+      <div class="sum-box"><div class="sum-val" style="color:var(--accent)">₹${fmt(totalNet)}</div><div class="sum-lbl">Total Payroll</div></div>
+      <div class="sum-box"><div class="sum-val" style="color:var(--green)">${paidCount}/${payrolls.length}</div><div class="sum-lbl">Paid</div></div>
+    </div>
+    <div class="export-bar">
+      <button class="btn-sm btn-primary" style="background:var(--accent);border:none;color:#fff" onclick="bulkRunPayroll(${m},${y})">⚡ Generate All</button>
+      <button class="btn-sm btn-pdf" onclick="exportPayrollPDF(${m},${y})">📄 PDF Summary</button>
+      <button class="btn-sm btn-excel" onclick="exportPayrollExcel(${m},${y})">📊 Excel</button>
+    </div>
+    ${summary.map(e=>{
+      const pr=payMap[e.id];
+      const statusColor={draft:'var(--yellow)',approved:'var(--accent2)',paid:'var(--green)'}[pr?.status]||'var(--muted)';
+      return `<div class="card" style="padding:12px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:34px;height:34px;background:var(--accent2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">${(e.full_name||'?')[0]}</div>
+            <div><div style="font-weight:700">${e.full_name}</div><div style="font-size:11px;color:var(--muted)">${e.role} · Base ₹${fmt(e.salary)}</div></div>
+          </div>
+          ${pr?`<span style="color:${statusColor};font-size:11px;font-weight:700;text-transform:uppercase">${pr.status}</span>`:
+             `<span style="color:var(--muted);font-size:11px">Not calculated</span>`}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;margin-bottom:10px">
+          <div style="text-align:center"><div style="font-weight:700;color:var(--green)">${e.present}</div><div style="color:var(--muted)">Present</div></div>
+          <div style="text-align:center"><div style="font-weight:700;color:var(--red)">${e.absent}</div><div style="color:var(--muted)">Absent</div></div>
+          <div style="text-align:center"><div style="font-weight:700;color:var(--yellow)">${e.half}</div><div style="color:var(--muted)">Half Day</div></div>
+          <div style="text-align:center"><div style="font-weight:700;color:var(--accent)">${e.overtime||0}h</div><div style="color:var(--muted)">Overtime</div></div>
+        </div>
+        ${pr?`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:var(--surface2);border-radius:8px;margin-bottom:8px">
+          <div style="font-size:12px"><div>Gross: ₹${fmt(pr.gross_salary)}</div><div style="color:var(--red)">Advance: -₹${fmt(pr.advance_deduction)}</div></div>
+          <div style="font-size:18px;font-weight:800;color:var(--accent)">₹${fmt(pr.net_salary)}</div>
+        </div>`:''}
+        <div style="display:flex;gap:6px">
+          <button onclick="calcAndShowSlip(${e.id},'${e.full_name}',${m},${y})" style="flex:1;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">🧮 Calculate</button>
+          ${pr?`<button onclick="exportSalarySlipPDF(${pr.id})" style="flex:1;padding:8px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">📄 Slip PDF</button>
+          ${pr.status!=='paid'?`<button onclick="markPaid(${pr.id},${m},${y})" style="flex:1;padding:8px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:#86efac;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">✓ Mark Paid</button>`:''}`:''}
+        </div>
+      </div>`;
+    }).join('')||`<div class="empty"><div class="empty-icon">👷</div>No employees found. <a onclick="showEmployeesList()" style="color:var(--accent);cursor:pointer">Add employees →</a></div>`}`;
+  window._payrollMonth=m; window._payrollYear=y;
+}
+
+async function calcAndShowSlip(empId,empName,m,y){
+  document.getElementById('mainContent').innerHTML='<div class="spinner"></div>';
+  const res=await apiFetch('/api/payroll/payroll/calculate',{method:'POST',body:{employeeId:empId,month:m,year:y}});
+  const {data}=await res.json();
+  if(!data) return showToast('Calculation error','error');
+  document.getElementById('mainContent').innerHTML=`
+    <button class="back-btn" onclick="showPayrollRun(${m},${y})">← Back</button>
+    <div class="section-title">🧮 Salary Preview — ${empName}</div>
+    <div class="card">
+      <div class="card-title">Attendance Breakdown</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
+        ${[['Present',data.present,'var(--green)'],['Absent',data.absent,'var(--red)'],['Half Day',data.half,'var(--yellow)'],['Leave',data.leave,'var(--accent2)'],['OT Hours',data.otHours,'var(--accent)'],['Eff. Days',data.effectiveDays.toFixed(1),'var(--text)']].map(([l,v,c])=>`<div class="sum-box"><div class="sum-val" style="color:${c};font-size:16px">${v}</div><div class="sum-lbl">${l}</div></div>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Earnings & Deductions</div>
+      <div class="info-row"><span class="info-label">Base Salary</span><span class="info-value">₹${fmt(data.baseSalary)}</span></div>
+      <div class="info-row"><span class="info-label">Earned (${data.effectiveDays.toFixed(1)}/${data.workingDays} days)</span><span class="info-value">₹${fmt(data.grossSalary - data.otAmount)}</span></div>
+      <div class="info-row"><span class="info-label">Overtime (${data.otHours}h × ₹50)</span><span class="info-value" style="color:var(--green)">+₹${fmt(data.otAmount)}</span></div>
+      <div class="info-row"><span class="info-label">Gross Salary</span><span class="info-value" style="font-weight:700">₹${fmt(data.grossSalary)}</span></div>
+      <div class="info-row"><span class="info-label">Advance Deduction</span><span class="info-value" style="color:var(--red)">-₹${fmt(data.advanceDeduction)}</span></div>
+      <div class="form-group" style="margin-top:8px"><label>Other Deductions (₹)</label><input type="number" id="otherDed" value="0" min="0"/></div>
+    </div>
+    <div style="background:var(--surface);border:2px solid var(--accent);border-radius:12px;padding:16px;text-align:center;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">NET SALARY</div>
+      <div style="font-size:32px;font-weight:800;color:var(--accent)">₹${fmt(data.netSalary)}</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="savePayroll(${empId},${m},${y})" style="flex:2">💾 Save & Generate Slip</button>
+      <button class="btn btn-outline" onclick="showPayrollRun(${m},${y})" style="flex:1">Cancel</button>
+    </div>`;
+  window._calcData=data;
+}
+
+async function savePayroll(empId,m,y){
+  const otherDed=parseFloat(document.getElementById('otherDed')?.value||0);
+  const res=await apiFetch('/api/payroll/payroll/save',{method:'POST',body:{employeeId:empId,month:m,year:y,otherDeductions:otherDed}});
+  const data=await res.json();
+  if(!res.ok) return showToast(data.error,'error');
+  showToast(`✓ Payroll saved. Net: ₹${fmt(data.netSalary)}`,'success');
+  showPayrollRun(m,y);
+}
+
+async function bulkRunPayroll(m,y){
+  showToast('Generating payroll for all...','success');
+  const res=await apiFetch('/api/payroll/payroll/bulk',{method:'POST',body:{month:m,year:y}});
+  const data=await res.json();
+  if(!res.ok) return showToast(data.error,'error');
+  showToast(`✓ ${data.message}`,'success');
+  showPayrollRun(m,y);
+}
+
+async function markPaid(payrollId,m,y){
+  const res=await apiFetch(`/api/payroll/payroll/${payrollId}/approve`,{method:'PUT',body:{paymentMode:'cash'}});
+  const data=await res.json();
+  if(!res.ok) return showToast(data.error,'error');
+  showToast('✓ Marked as paid','success');
+  showPayrollRun(m,y);
+}
+
+// ── SALARY ADVANCES ───────────────────────────────────────────────────────
+async function showAdvances(){
+  const [empRes,advRes]=await Promise.all([apiFetch('/api/employees'),apiFetch('/api/payroll/advances')]);
+  const emps=(await empRes.json()).data||[];
+  const advances=(await advRes.json()).data||[];
+  const totalBalance=advances.filter(a=>a.status==='active').reduce((s,a)=>s+(a.balance_remaining||0),0);
+  document.getElementById('mainContent').innerHTML=`
+    <button class="back-btn" onclick="showPayrollHub()">← Back</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="section-title" style="margin:0">💸 Salary Advances</div>
+      <button onclick="showAddAdvance()" style="background:var(--accent);border:none;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">+ New</button>
+    </div>
+    <div class="summary-strip">
+      <div class="sum-box"><div class="sum-val">${advances.filter(a=>a.status==='active').length}</div><div class="sum-lbl">Active</div></div>
+      <div class="sum-box"><div class="sum-val" style="color:var(--red)">₹${fmt(totalBalance)}</div><div class="sum-lbl">Total Balance</div></div>
+      <div class="sum-box"><div class="sum-val" style="color:var(--green)">${advances.filter(a=>a.status==='cleared').length}</div><div class="sum-lbl">Cleared</div></div>
+    </div>
+    ${advances.map(a=>`<div class="list-item" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+        <div><div class="list-item-title">${a.full_name}</div><div class="list-item-sub">${a.reason||'Advance'} · ${a.advance_date}</div></div>
+        <div style="text-align:right"><div style="font-weight:700;color:${a.status==='active'?'var(--red)':'var(--green)'}">₹${fmt(a.balance_remaining)}</div><span class="badge badge-${a.status==='active'?'credit':'ms'}">${a.status}</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:8px">
+        <span>Original: ₹${fmt(a.amount)}</span>
+        <span>Monthly EMI: ₹${fmt(a.monthly_deduction)}</span>
+        <span>${a.repay_months} month${a.repay_months>1?'s':''}</span>
+      </div>
+      ${a.status==='active'?`<button onclick="clearAdvance(${a.id})" style="width:100%;padding:7px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:#86efac;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">Mark Cleared</button>`:''}
+    </div>`).join('')||`<div class="empty"><div class="empty-icon">💸</div>No advances recorded</div>`}`;
+}
+
+function showAddAdvance(){
+  apiFetch('/api/employees').then(r=>r.json()).then(({data:emps})=>{
+    document.getElementById('mainContent').innerHTML=`
+      <button class="back-btn" onclick="showAdvances()">← Back</button>
+      <div class="section-title">New Salary Advance</div>
+      <div class="card">
+        <div class="form-group"><label>Employee *</label><select id="advEmp">${emps.map(e=>`<option value="${e.id}">${e.full_name}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Amount (₹) *</label><input id="advAmt" type="number" placeholder="e.g. 5000"/></div>
+        <div class="form-group"><label>Reason</label><input id="advReason" placeholder="Medical / Personal / Other"/></div>
+        <div class="form-group"><label>Repay in (months)</label><select id="advMonths">${[1,2,3,4,5,6].map(n=>`<option value="${n}">${n} month${n>1?'s':''}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Date</label><input id="advDate" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+        <div id="advPreview" style="background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:var(--muted)">Monthly EMI: —</div>
+        <button class="btn btn-primary" onclick="saveAdvance()">Record Advance</button>
+      </div>`;
+    ['advAmt','advMonths'].forEach(id=>document.getElementById(id)?.addEventListener('input',updateAdvPreview));
+  });
+}
+
+function updateAdvPreview(){
+  const amt=parseFloat(document.getElementById('advAmt')?.value||0);
+  const months=parseInt(document.getElementById('advMonths')?.value||1);
+  if(amt>0&&months>0){
+    const emi=(amt/months).toFixed(2);
+    document.getElementById('advPreview').innerHTML=`<span style="color:var(--text)">Monthly EMI: <strong>₹${fmt(parseFloat(emi))}</strong> × ${months} month${months>1?'s':''}</span>`;
+  }
+}
+
+async function saveAdvance(){
+  const employeeId=document.getElementById('advEmp').value;
+  const amount=parseFloat(document.getElementById('advAmt').value);
+  const reason=document.getElementById('advReason').value;
+  const repayMonths=parseInt(document.getElementById('advMonths').value);
+  const advanceDate=document.getElementById('advDate').value;
+  if(!amount||amount<=0) return showToast('Enter valid amount','error');
+  const res=await apiFetch('/api/payroll/advances',{method:'POST',body:{employeeId,amount,reason,repayMonths,advanceDate}});
+  const data=await res.json();
+  if(!res.ok) return showToast(data.error||data.errors?.[0]?.msg||'Error','error');
+  showToast(`✓ Advance ₹${fmt(amount)} recorded. EMI ₹${fmt(data.monthlyDeduction)}/mo`,'success');
+  showAdvances();
+}
+
+async function clearAdvance(id){
+  const res=await apiFetch(`/api/payroll/advances/${id}/clear`,{method:'PUT'});
+  const data=await res.json();
+  if(!res.ok) return showToast(data.error,'error');
+  showToast('✓ Advance cleared','success'); showAdvances();
+}
+
+// ── PERFORMANCE REPORT ────────────────────────────────────────────────────
+async function showPerformance(mVal,yVal){
+  const m=mVal||_payMonth, y=yVal||_payYear;
+  const res=await apiFetch(`/api/payroll/performance?month=${m}&year=${y}`);
+  const {data}=await res.json();
+  const monthName=new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'});
+  const medals=['🥇','🥈','🥉'];
+  document.getElementById('mainContent').innerHTML=`
+    <button class="back-btn" onclick="showPayrollHub()">← Back</button>
+    <div class="section-title">📈 Performance — ${monthName}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <button onclick="showPerformance(${m===1?12:m-1},${m===1?y-1:y})" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:8px;cursor:pointer">‹</button>
+      <span style="font-weight:700;flex:1;text-align:center">${monthName}</span>
+      <button onclick="showPerformance(${m===12?1:m+1},${m===12?y+1:y})" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:8px;cursor:pointer">›</button>
+    </div>
+    <div class="export-bar">
+      <button class="btn-sm btn-pdf" onclick="exportPerfPDF(${m},${y})">📄 PDF Report</button>
+      <button class="btn-sm btn-excel" onclick="exportPerfExcel(${m},${y})">📊 Excel</button>
+    </div>
+    ${(data||[]).map((e,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;${i<3?'border-color:'+['rgba(255,215,0,.4)','rgba(192,192,192,.4)','rgba(205,127,50,.4)'][i]:''}}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="font-size:24px;width:36px;text-align:center">${medals[i]||'#'+(i+1)}</div>
+        <div style="flex:1">
+          <div style="font-weight:700">${e.full_name}</div>
+          <div style="font-size:11px;color:var(--muted)">${e.role}${e.emp_code?' · #'+e.emp_code:''}</div>
+        </div>
+        <div style="text-align:right"><div style="font-size:18px;font-weight:800;color:var(--accent)">${(e.litres||0).toFixed(0)}L</div><div style="font-size:10px;color:var(--muted)">dispensed</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px">
+        <div style="text-align:center;background:var(--surface2);border-radius:6px;padding:6px"><div style="font-weight:700;color:var(--accent2)">${e.txns}</div><div style="color:var(--muted)">Sales</div></div>
+        <div style="text-align:center;background:var(--surface2);border-radius:6px;padding:6px"><div style="font-weight:700;color:var(--green)">${e.attendanceRate!=null?e.attendanceRate+'%':'—'}</div><div style="color:var(--muted)">Attendance</div></div>
+        <div style="text-align:center;background:var(--surface2);border-radius:6px;padding:6px"><div style="font-weight:700;color:${(e.avgCashVariance||0)>200?'var(--red)':'var(--green)'}">₹${fmt(e.avgCashVariance)}</div><div style="color:var(--muted)">Avg Variance</div></div>
+        <div style="text-align:center;background:var(--surface2);border-radius:6px;padding:6px"><div style="font-weight:700;color:var(--accent)">${e.shiftsCompleted}</div><div style="color:var(--muted)">Shifts</div></div>
+      </div>
+      ${e.totalAdvanceBalance>0?`<div style="margin-top:8px;font-size:11px;color:var(--yellow)">⚠️ Advance balance: ₹${fmt(e.totalAdvanceBalance)}</div>`:''}
+    </div>`).join('')||`<div class="empty"><div class="empty-icon">📈</div>No performance data for ${monthName}</div>`}`;
+  window._perfData={data,m,y};
+}
+
+// ── EMPLOYEES LIST ────────────────────────────────────────────────────────
+async function showEmployeesList(){
   const res=await apiFetch('/api/employees');
   const emps=(await res.json()).data||[];
   document.getElementById('mainContent').innerHTML=`
-    <button class="back-btn" onclick="renderMore()">← Back</button>
-    <div class="section-title">Employees</div>
-    ${emps.map(e=>`<div class="list-item"><div style="width:36px;height:36px;background:var(--accent2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;margin-right:10px;flex-shrink:0">${(e.full_name||'?')[0]}</div><div class="list-item-left"><div class="list-item-title">${e.full_name}</div><div class="list-item-sub">${e.role} · ₹${fmt(e.salary)}/mo${e.mobile?' · '+e.mobile:''}</div></div></div>`).join('')||'<div class="empty"><div class="empty-icon">👷</div>No employees added</div>'}`;
+    <button class="back-btn" onclick="showPayrollHub()">← Back</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="section-title" style="margin:0">👤 Employees</div>
+      <button onclick="showAddEmployee()" style="background:var(--accent);border:none;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">+ Add</button>
+    </div>
+    ${emps.map(e=>`<div class="list-item"><div style="width:36px;height:36px;background:var(--accent2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;margin-right:10px;flex-shrink:0">${(e.full_name||'?')[0]}</div><div class="list-item-left"><div class="list-item-title">${e.full_name}</div><div class="list-item-sub">${e.role} · ₹${fmt(e.salary)}/mo${e.mobile?' · '+e.mobile:''}</div></div><div style="font-size:11px;color:var(--muted)">${e.emp_code||''}</div></div>`).join('')||'<div class="empty"><div class="empty-icon">👷</div>No employees added</div>'}`;
 }
 
-// ── SETTINGS ──────────────────────────────────────────────────────────────
+function showAddEmployee(){
+  document.getElementById('mainContent').innerHTML=`
+    <button class="back-btn" onclick="showEmployeesList()">← Back</button>
+    <div class="section-title">Add Employee</div>
+    <div class="card">
+      <div class="form-group"><label>Full Name *</label><input id="eName" placeholder="Employee full name"/></div>
+      <div class="form-group"><label>Role *</label><select id="eRole"><option value="attendant">Attendant</option><option value="cashier">Cashier</option><option value="manager">Manager</option><option value="mechanic">Mechanic</option><option value="security">Security</option></select></div>
+      <div class="form-group"><label>Employee Code</label><input id="eCode" placeholder="e.g. EMP001"/></div>
+      <div class="form-group"><label>Mobile</label><input id="eMobile" type="tel" placeholder="Mobile number"/></div>
+      <div class="form-group"><label>Monthly Salary (₹) *</label><input id="eSalary" type="number" placeholder="e.g. 12000"/></div>
+      <div class="form-group"><label>Join Date</label><input id="eJoin" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+      <button class="btn btn-primary" onclick="saveEmployee()">Save Employee</button>
+    </div>`;
+}
+
+async function saveEmployee(){
+  const fullName=document.getElementById('eName').value.trim();
+  const role=document.getElementById('eRole').value;
+  const salary=parseFloat(document.getElementById('eSalary').value);
+  if(!fullName||!salary) return showToast('Name and salary required','error');
+  const res=await apiFetch('/api/employees',{method:'POST',body:{fullName,role,mobile:document.getElementById('eMobile').value,salary,joinDate:document.getElementById('eJoin').value,empCode:document.getElementById('eCode').value}});
+  const data=await res.json();
+  if(!res.ok) return showToast(data.error||data.errors?.[0]?.msg||'Error','error');
+  showToast('✓ Employee added','success'); showEmployeesList();
+}
+
+// ── SPRINT 2: PDF EXPORTS ─────────────────────────────────────────────────
+async function exportSalarySlipPDF(payrollId){
+  showToast('Generating salary slip...','success');
+  const res=await apiFetch(`/api/payroll/payroll/${payrollId}`);
+  const {data:p}=await res.json();
+  if(!p) return showToast('Payroll not found','error');
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  // Header
+  doc.setFillColor(15,17,23); doc.rect(0,0,210,35,'F');
+  doc.setTextColor(249,115,22); doc.setFontSize(18); doc.setFont('helvetica','bold');
+  doc.text(p.station_name||'Fuel Station',14,14);
+  doc.setTextColor(241,245,249); doc.setFontSize(10);
+  doc.text(`SALARY SLIP — ${new Date(p.payroll_year,p.payroll_month-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})}`,14,22);
+  doc.setTextColor(148,163,184); doc.setFontSize(8);
+  doc.text(p.station_mobile||'',14,30);
+  // Employee details box
+  doc.setFillColor(240,243,250); doc.rect(14,40,182,28,'F');
+  doc.setTextColor(0); doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text(`Employee: ${p.full_name}`,18,48); doc.text(`Code: ${p.emp_code||'—'}`,18,54); doc.text(`Role: ${p.role}`,18,60);
+  doc.text(`Mobile: ${p.mobile||'—'}`,110,48); doc.text(`Join Date: ${p.join_date||'—'}`,110,54); doc.text(`Status: ${p.status?.toUpperCase()}`,110,60);
+  // Earnings table
+  let y=75;
+  doc.autoTable({startY:y,head:[['Description','Days/Hours','Amount (₹)']],
+    body:[
+      ['Base Salary',`${p.working_days} days`, `₹${fmt(p.base_salary)}`],
+      ['Days Present',p.days_present, `₹${fmt((p.base_salary/p.working_days)*p.days_present)}`],
+      ['Half Days (×0.5)',p.half_days, p.half_days>0?`₹${fmt((p.base_salary/p.working_days)*p.half_days*0.5)}`:'—'],
+      ['Overtime',`${p.overtime_hours}h`, `₹${fmt(p.overtime_amount)}`],
+      ['','Gross Salary',`₹${fmt(p.gross_salary)}`],
+      ['Advance Deduction','',`-₹${fmt(p.advance_deduction)}`],
+      ['Other Deductions','',`-₹${fmt(p.other_deductions)}`],
+    ],
+    foot:[['','NET SALARY',`₹${fmt(p.net_salary)}`]],
+    headStyles:{fillColor:[249,115,22],textColor:[255,255,255]},
+    footStyles:{fillColor:[35,40,56],textColor:[255,255,255],fontStyle:'bold',fontSize:11},
+    alternateRowStyles:{fillColor:[247,249,252]},
+    margin:{left:14,right:14}
+  });
+  // Signature
+  const fy=doc.lastAutoTable.finalY+20;
+  doc.setFontSize(9); doc.setTextColor(100);
+  doc.text('Employee Signature: ____________________',14,fy);
+  doc.text('Authorized Signature: ____________________',120,fy);
+  doc.setFontSize(8); doc.text(`Generated: ${new Date().toLocaleString('en-IN')} · FuelBunk Pro`,14,fy+8);
+  doc.save(`Salary-Slip-${p.full_name.replace(/\s/g,'-')}-${p.payroll_month}-${p.payroll_year}.pdf`);
+}
+
+async function exportPayrollPDF(m,y){
+  showToast('Generating PDF...','success');
+  const res=await apiFetch(`/api/payroll/payroll?month=${m}&year=${y}`);
+  const {data}=await res.json();
+  if(!data?.length) return showToast('No payroll data','error');
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF('landscape');
+  let yp=pdfHeader(doc,`Payroll Summary`,`${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})} · Station: ${currentStation?.name||currentStation?.code||''}`);
+  doc.autoTable({startY:yp,
+    head:[['Employee','Role','Present','Absent','Half','OT','Gross','Advance','Net Salary','Status']],
+    body:data.map(p=>[p.full_name,p.role,p.days_present,p.days_absent,p.half_days,p.overtime_hours,`₹${fmt(p.gross_salary)}`,`₹${fmt(p.advance_deduction)}`,`₹${fmt(p.net_salary)}`,p.status]),
+    foot:[['TOTAL','','','','','','',``,`₹${fmt(data.reduce((a,p)=>a+(p.net_salary||0),0))}`,'']],
+    headStyles:{fillColor:[249,115,22]},footStyles:{fillColor:[35,40,56],textColor:[255,255,255],fontStyle:'bold'},
+    alternateRowStyles:{fillColor:[247,249,252]},margin:{left:10,right:10}
+  });
+  pdfFooter(doc); doc.save(`Payroll-${m}-${y}.pdf`);
+}
+
+async function exportPayrollExcel(m,y){
+  const res=await apiFetch(`/api/payroll/payroll?month=${m}&year=${y}`);
+  const {data}=await res.json();
+  if(!data?.length) return showToast('No payroll data','error');
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.json_to_sheet(data.map(p=>({'Name':p.full_name,'Role':p.role,'Present':p.days_present,'Absent':p.days_absent,'Half Days':p.half_days,'OT Hours':p.overtime_hours,'Gross (₹)':p.gross_salary,'Advance Deduction (₹)':p.advance_deduction,'Other Deductions (₹)':p.other_deductions,'Net Salary (₹)':p.net_salary,'Status':p.status})));
+  XLSX.utils.book_append_sheet(wb,ws,'Payroll');
+  XLSX.writeFile(wb,`Payroll-${m}-${y}.xlsx`);
+}
+
+async function exportPerfPDF(m,y){
+  const {data}=window._perfData||{};
+  if(!data?.length) return showToast('Load performance report first','error');
+  showToast('Generating PDF...','success');
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  let yp=pdfHeader(doc,'Employee Performance Report',`${new Date(y,m-1,1).toLocaleString('en-IN',{month:'long',year:'numeric'})} · Station: ${currentStation?.name||currentStation?.code||''}`);
+  doc.autoTable({startY:yp,head:[['Rank','Employee','Role','Litres','Sales','Attendance%','Avg Variance','Shifts']],
+    body:data.map((e,i)=>[i+1,e.full_name,e.role,(e.litres||0).toFixed(0)+'L',e.txns,e.attendanceRate!=null?e.attendanceRate+'%':'—','₹'+fmt(e.avgCashVariance),e.shiftsCompleted]),
+    headStyles:{fillColor:[249,115,22]},alternateRowStyles:{fillColor:[247,249,252]},margin:{left:14,right:14}
+  });
+  pdfFooter(doc); doc.save(`Performance-${m}-${y}.pdf`);
+}
+
+async function exportPerfExcel(m,y){
+  const {data}=window._perfData||{};
+  if(!data?.length) return showToast('Load performance report first','error');
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.json_to_sheet(data.map((e,i)=>({'Rank':i+1,'Name':e.full_name,'Role':e.role,'Litres Dispensed':e.litres,'Sales Count':e.txns,'Revenue (₹)':e.revenue,'Attendance %':e.attendanceRate,'Avg Cash Variance (₹)':e.avgCashVariance,'Shifts Completed':e.shiftsCompleted,'Advance Balance (₹)':e.totalAdvanceBalance})));
+  XLSX.utils.book_append_sheet(wb,ws,'Performance');
+  XLSX.writeFile(wb,`Performance-${m}-${y}.xlsx`);
+}
+
+async function showEmployees(){showPayrollHub();}
+
+
 async function showSettings(){
   const res=await apiFetch('/api/settings');
   const s=(await res.json()).data;
