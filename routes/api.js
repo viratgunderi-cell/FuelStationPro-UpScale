@@ -13,6 +13,52 @@ router.get('/tanks', async (req, res) => {
   res.json({ success: true, data });
 });
 
+// ── TANK CRUD (Sprint 6 redesign) ─────────────────────────────────────────
+router.post('/tanks', authorize('owner','manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const { tankName, fuelType, displayName, capacity, currentStock, minAlert } = req.body;
+  if (!tankName || !fuelType || !capacity)
+    return res.status(400).json({ success: false, error: 'tankName, fuelType, capacity required.' });
+  if (!['MS','HSD','CNG'].includes(fuelType))
+    return res.status(400).json({ success: false, error: 'fuelType must be MS, HSD or CNG.' });
+  const r = await db.run(
+    `INSERT INTO tanks (station_id,tank_name,fuel_type,display_name,capacity,current_stock,min_alert) VALUES (?,?,?,?,?,?,?)`,
+    [sid, tankName, fuelType, displayName||null, parseFloat(capacity), parseFloat(currentStock||0), parseFloat(minAlert||2000)]
+  );
+  await db.logAudit(sid, req.user.id, req.user.username, 'TANK_ADD', 'tanks', r.lastInsertRowid, null,
+    { tankName, fuelType, capacity }, req.ip, req.get('user-agent'));
+  res.status(201).json({ success: true, tankId: r.lastInsertRowid, message: 'Tank added.' });
+});
+
+router.put('/tanks/:id', authorize('owner','manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const tank = await db.get('SELECT * FROM tanks WHERE id=? AND station_id=?', [req.params.id, sid]);
+  if (!tank) return res.status(404).json({ success: false, error: 'Tank not found.' });
+  const { tankName, displayName, capacity, minAlert } = req.body;
+  await db.run(
+    `UPDATE tanks SET tank_name=COALESCE(?,tank_name), display_name=COALESCE(?,display_name),
+     capacity=COALESCE(?,capacity), min_alert=COALESCE(?,min_alert), updated_at=datetime('now') WHERE id=?`,
+    [tankName||null, displayName!==undefined?displayName:null, capacity?parseFloat(capacity):null,
+     minAlert?parseFloat(minAlert):null, tank.id]
+  );
+  await db.logAudit(sid, req.user.id, req.user.username, 'TANK_EDIT', 'tanks', tank.id, tank, req.body, req.ip, req.get('user-agent'));
+  res.json({ success: true, message: 'Tank updated.' });
+});
+
+router.delete('/tanks/:id', authorize('owner'), async (req, res) => {
+  const sid = req.user.stationId;
+  const tank = await db.get('SELECT * FROM tanks WHERE id=? AND station_id=?', [req.params.id, sid]);
+  if (!tank) return res.status(404).json({ success: false, error: 'Tank not found.' });
+  // Guard: don't delete if has sales in last 30 days
+  const recentSales = await db.get(
+    `SELECT COUNT(*) as c FROM sales WHERE tank_id=? AND date(sale_time)>=date('now','-30 days')`, [tank.id]);
+  if (recentSales?.c > 0)
+    return res.status(409).json({ success: false, error: `Cannot delete — ${recentSales.c} sales recorded in last 30 days. Deactivate instead.` });
+  await db.run(`UPDATE tanks SET is_active=0, updated_at=datetime('now') WHERE id=?`, [tank.id]);
+  await db.logAudit(sid, req.user.id, req.user.username, 'TANK_DELETE', 'tanks', tank.id, tank, null, req.ip, req.get('user-agent'));
+  res.json({ success: true, message: 'Tank deactivated.' });
+});
+
 router.post('/tanks/dip-reading', authorize('owner','manager'), async (req, res) => {
   const { tankId, calculatedLitres, dipMm, notes } = req.body;
   const tank = await db.get('SELECT * FROM tanks WHERE id=? AND station_id=?', [tankId, req.user.stationId]);
@@ -350,6 +396,22 @@ router.get('/tanks/:id/dip-readings', async (req, res) => {
   const tank = await db.get('SELECT id,tank_name FROM tanks WHERE id=? AND station_id=?', [req.params.id, sid]);
   if (!tank) return res.status(404).json({ success: false, error: 'Tank not found.' });
   const rows = await db.all(`SELECT dr.*,u.full_name as taken_by_name FROM dip_readings dr LEFT JOIN users u ON u.id=dr.taken_by WHERE dr.tank_id=? AND dr.station_id=? ORDER BY dr.reading_time DESC LIMIT 30`, [req.params.id, sid]);
+  res.json({ success: true, data: rows });
+});
+
+// ── Recent dip readings across ALL tanks (for the new inventory page) ──────
+router.get('/tanks/recent-dip-readings', async (req, res) => {
+  const sid = req.user.stationId;
+  const limit = Math.min(parseInt(req.query.limit)||50, 200);
+  const rows = await db.all(
+    `SELECT dr.*, t.tank_name, t.fuel_type, t.display_name, u.full_name as taken_by_name
+     FROM dip_readings dr
+     JOIN tanks t ON t.id=dr.tank_id
+     LEFT JOIN users u ON u.id=dr.taken_by
+     WHERE dr.station_id=?
+     ORDER BY dr.reading_time DESC LIMIT ?`,
+    [sid, limit]
+  );
   res.json({ success: true, data: rows });
 });
 

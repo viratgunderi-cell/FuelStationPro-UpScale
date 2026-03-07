@@ -1096,103 +1096,502 @@ async function renderStock(tab){
   else await _renderPurchasesTab(today);
 }
 
-// ── TAB 1: TANKS & DIP CHART ───────────────────────────────────────────────
+// ── TAB 1: TANKS & INVENTORY (Sprint 6 redesign) ───────────────────────────
+
+// Fuel config: internal type → display label, dot color, card border color
+const FUEL_CFG = {
+  MS:  { label:'Petrol',  sub:'Petrol (MS)',    dot:'#ef4444', border:'rgba(239,68,68,.45)',  bg:'rgba(239,68,68,.07)',  badge:'background:rgba(239,68,68,.18);color:#fca5a5' },
+  HSD: { label:'Diesel',  sub:'Diesel (HSD)',   dot:'#f97316', border:'rgba(249,115,22,.45)', bg:'rgba(249,115,22,.07)', badge:'background:rgba(249,115,22,.18);color:#fdba74' },
+  CNG: { label:'CNG',     sub:'CNG (Gas)',      dot:'#3b82f6', border:'rgba(59,130,246,.45)', bg:'rgba(59,130,246,.07)', badge:'background:rgba(59,130,246,.18);color:#93c5fd' },
+};
+// displayName lets stations give custom names like "XP95 Premium" to MS tanks
+function tankLabel(t){ return t.display_name || FUEL_CFG[t.fuel_type]?.label || t.fuel_type; }
+function tankSub(t)  { return FUEL_CFG[t.fuel_type]?.sub || t.fuel_type; }
+
 async function _renderTanksTab(today){
-  const [dipStatusRes,movRes]=await Promise.all([apiFetch('/api/tanks/dip-status'),apiFetch(`/api/reports/stock-movement?date=${today}`)]);
-  const tanks=(await dipStatusRes.json()).data||[];
-  const mov=(await movRes.json()).data||{movements:[]};
-  const tc=document.getElementById('stockTabContent');
-  tc.innerHTML=`
-    <div class="export-bar" style="margin-top:8px">
-      <button class="btn-sm btn-pdf" onclick="exportStockPDF('${today}')">📄 PDF</button>
-      <button class="btn-sm btn-excel" onclick="exportStockExcel('${today}')">📊 Excel</button>
-    </div>
-    <!-- Stock Movement Today -->
-    <div class="section-title">Stock Movement — ${today}</div>
-    <div class="movement-card">
-      <div class="movement-header"><span class="movement-title">Opening → Purchases → Sales → Closing</span></div>
-      <div style="overflow-x:auto">
-      <table class="data-table">
-        <thead><tr><th>Tank</th><th>Opening</th><th>+Received</th><th>−Sold</th><th>Closing</th><th>Variance</th></tr></thead>
-        <tbody>
-          ${mov.movements.map(m=>{const vc=Math.abs(m.variance||0)>50?'neg':'pos';return`<tr>
-            <td><strong>${m.tankName}</strong><br><span style="font-size:10px;color:var(--text2)">${m.fuelType}</span></td>
-            <td>${m.opening.toFixed(0)}L</td>
-            <td class="${m.received>0?'pos':''}">${m.received>0?'+'+m.received.toFixed(0)+'L':'—'}</td>
-            <td>${m.sold.toFixed(0)}L</td>
-            <td><strong>${m.closing.toFixed(0)}L</strong></td>
-            <td class="${vc}">${(m.variance||0)>0?'+':''}${(m.variance||0).toFixed(1)}L</td>
-          </tr>`;}).join('')}
-          <tr class="total-row"><td>TOTAL</td>
-            <td>${mov.movements.reduce((a,b)=>a+b.opening,0).toFixed(0)}L</td>
-            <td>${mov.movements.reduce((a,b)=>a+b.received,0).toFixed(0)}L</td>
-            <td>${mov.movements.reduce((a,b)=>a+b.sold,0).toFixed(0)}L</td>
-            <td>${mov.movements.reduce((a,b)=>a+b.closing,0).toFixed(0)}L</td>
-            <td></td></tr>
-        </tbody>
-      </table></div>
+  const [dipStatusRes, dipReadingsRes, purchasesRes] = await Promise.all([
+    apiFetch('/api/tanks/dip-status'),
+    apiFetch('/api/tanks/recent-dip-readings'),
+    apiFetch('/api/purchases'),
+  ]);
+  const tanks      = (await dipStatusRes.json()).data    || [];
+  const dipHistory = (await dipReadingsRes.json()).data  || [];
+  const purchases  = (await purchasesRes.json()).data    || [];
+  const tc = document.getElementById('stockTabContent');
+
+  tc.innerHTML = `
+    <!-- ── Page header with action buttons ────────────────────────────── -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 14px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:18px;font-weight:800;display:flex;align-items:center;gap:8px">
+        🏷️ Tank &amp; Inventory
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="showAddTankModal()" style="display:flex;align-items:center;gap:6px;padding:9px 16px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Add Tank</button>
+        <button onclick="showGlobalDipModal()" style="display:flex;align-items:center;gap:6px;padding:9px 16px;background:var(--accent);color:#000;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">📏 + Record Dip</button>
+        <button onclick="renderStock('purchases')" style="display:flex;align-items:center;gap:6px;padding:9px 16px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Fuel Purchase</button>
+      </div>
     </div>
 
-    <!-- Tank Cards -->
-    <div class="section-title" style="margin-top:12px">Tank Levels & Dip Chart Status</div>
-    <div class="tanks-grid">
-      ${tanks.map(t=>{
-        const pct=Math.min(100,Math.round((t.current_stock/t.capacity)*100));
-        const lvl=pct<15?'low':pct<40?'med':'ok';
-        const lvlColor=lvl==='low'?'var(--red)':lvl==='med'?'var(--yellow)':'var(--green)';
-        const fuelCls=t.fuel_type==='MS'?'fuel-ms':t.fuel_type==='HSD'?'fuel-hsd':'fuel-cng';
-        const chartBadge=t.chartPoints>0
-          ?`<span style="background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3);font-size:10px;padding:2px 7px;border-radius:5px;font-weight:700">📐 ${t.chartPoints} pts</span>`
-          :`<span style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.25);font-size:10px;padding:2px 7px;border-radius:5px">No chart</span>`;
-        const lastDip=t.lastReading?`Last dip: ${new Date(t.lastReading.reading_time).toLocaleDateString('en-IN')} · ${t.lastReading.calculated_litres?.toFixed(0)}L`:'No dip readings yet';
-        return`<div class="tank-card">
-          <div class="tank-card-head">
-            <div><div class="tank-card-name">${t.tank_name}</div><div style="font-size:10px;color:var(--text2);margin-top:2px">${lastDip}</div></div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-              <span class="tank-card-fuel badge-${t.fuel_type.toLowerCase()}">${t.fuel_type}</span>
-              ${chartBadge}
+    <!-- ── Tank Cards Grid ─────────────────────────────────────────────── -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:20px">
+      ${tanks.map(t => {
+        const cfg   = FUEL_CFG[t.fuel_type] || FUEL_CFG.MS;
+        const pct   = Math.min(100, (t.current_stock / t.capacity) * 100);
+        const pctRd = Math.round(pct * 10) / 10;
+        const lvl   = pct < 15 ? 'LOW' : pct < 40 ? 'MED' : 'OK';
+        const lvlColor = lvl==='LOW' ? '#ef4444' : lvl==='MED' ? '#f59e0b' : '#22c55e';
+        const label = tankLabel(t);
+        const lastDipStr = t.lastReading
+          ? new Date(t.lastReading.reading_time).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
+          : 'No dip yet';
+        const chartInfo = t.chartPoints > 0
+          ? `🗂️ Chart (${t.chartPoints} pts)`
+          : '⚠ No dip chart';
+        return `
+        <div style="background:var(--surface);border:1px solid ${cfg.border};border-radius:14px;overflow:hidden;position:relative">
+          <!-- top bar accent -->
+          <div style="height:3px;background:${cfg.border};width:100%"></div>
+
+          <!-- Card header -->
+          <div style="padding:14px 16px 10px;display:flex;align-items:flex-start;justify-content:space-between">
+            <div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:15px;font-weight:800">${t.tank_name}</span>
+                <span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;${cfg.badge}">${label}</span>
+              </div>
+              <div style="font-size:11px;color:var(--text2);margin-top:4px">Last dip: ${lastDipStr}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.25);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:700;color:${lvlColor}">
+              ⚡ ${lvl} ${pctRd.toFixed(0)}%
             </div>
           </div>
-          <div class="tank-card-body">
-            <div class="tank-volume">${t.current_stock.toFixed(0)}<span>L</span></div>
-            <div class="tank-cap">Capacity: ${t.capacity.toLocaleString('en-IN')}L · Empty: ${(t.capacity-t.current_stock).toFixed(0)}L</div>
+
+          <!-- Volume display -->
+          <div style="padding:6px 16px 12px;background:${cfg.bg}">
+            <div style="font-size:11px;font-weight:700;color:${cfg.dot};letter-spacing:.8px;margin-bottom:4px">🏷️ AVAILABLE TO DISPENSE</div>
+            <div style="font-size:36px;font-weight:900;letter-spacing:-1px;color:var(--text)">${Math.round(t.current_stock).toLocaleString('en-IN')}<span style="font-size:18px;font-weight:400;color:var(--text2);margin-left:4px">L</span></div>
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">Tank capacity: ${t.capacity.toLocaleString('en-IN')} L &nbsp;·&nbsp; Empty: ${Math.round(t.capacity - t.current_stock).toLocaleString('en-IN')} L</div>
           </div>
-          <div class="tank-progress-wrap">
-            <div class="tank-progress-row">
-              <span class="tank-pct-label" style="color:${lvlColor}">${lvl==='low'?'⚡ LOW STOCK':lvl==='med'?'⚠ MEDIUM':'✓ OK'}</span>
-              <span class="tank-pct-label">${pct}%</span>
+
+          <!-- Progress bar -->
+          <div style="padding:10px 16px 6px">
+            <div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+              <div style="height:100%;width:${Math.max(2,pct)}%;background:#f97316;border-radius:4px;transition:width .5s"></div>
             </div>
-            <div class="progress-track"><div class="progress-fill ${fuelCls}" style="width:${Math.max(2,pct)}%"></div></div>
+            <div style="text-align:right;font-size:11px;color:var(--text2);margin-top:4px">${pctRd}%</div>
           </div>
-          <div class="tank-card-foot">
-            <button class="btn-sm" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border2)" onclick="showDipChartEditor(${t.id},'${t.tank_name}',${t.capacity})">📐 Dip Chart</button>
-            <button class="btn-sm" style="flex:1;background:var(--accent);color:#000;font-weight:700;border:none" onclick="showDipReadingForm(${t.id},'${t.tank_name}',${t.chartPoints>0})">📏 Dip Reading</button>
+
+          <!-- Action buttons -->
+          <div style="padding:8px 16px 14px;display:flex;gap:8px">
+            <button onclick="showDipReadingModal(${t.id})" style="flex:3;padding:9px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:13px">📏 Record Dip</button>
+            <button onclick="showEditTankModal(${t.id},'${t.tank_name.replace(/'/g,"\\'")}','${t.fuel_type}',${t.capacity},${t.min_alert},'${(t.display_name||'').replace(/'/g,"\\'")}' )" title="Edit tank" style="flex:1;padding:9px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;cursor:pointer;font-size:15px">✏️</button>
+            <button onclick="deleteTank(${t.id},'${t.tank_name.replace(/'/g,"\\'")}' )" title="Delete tank" style="flex:1;padding:9px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);color:#fca5a5;border-radius:8px;cursor:pointer;font-size:15px">🗑</button>
+          </div>
+
+          <!-- Chart badge -->
+          <div style="padding:0 16px 12px">
+            <button onclick="showDipChartEditor(${t.id},'${t.tank_name.replace(/'/g,"\\'")}',${t.capacity})" style="width:100%;padding:6px;background:var(--surface2);border:1px dashed var(--border2);color:var(--text2);border-radius:6px;cursor:pointer;font-size:11px">📐 ${chartInfo}</button>
           </div>
         </div>`;
-      }).join('')}
+      }).join('') || `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text2)">No tanks yet. Click <strong>+ Add Tank</strong> to get started.</div>`}
+    </div>
+
+    <!-- ── Recent Dip Readings table ────────────────────────────────────── -->
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:12px;overflow:hidden;margin-bottom:20px">
+      <div style="padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)">
+        <div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px">📏 Recent Dip Readings</div>
+        <button onclick="exportStockPDF('${today}')" style="padding:5px 12px;background:var(--surface2);border:1px solid var(--border2);color:var(--text2);border-radius:6px;cursor:pointer;font-size:11px">↓ Export</button>
+      </div>
+      ${dipHistory.length ? `
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr>
+            <th>DATE</th><th>TIME</th><th>TANK</th>
+            <th style="text-align:right">AVAILABLE QTY (L)</th>
+            <th style="text-align:right">PREV BOOK STOCK (L)</th>
+            <th style="text-align:right">VARIANCE</th>
+          </tr></thead>
+          <tbody>
+            ${dipHistory.map(d => {
+              const varPct = d.variance != null && d.actual_stock > 0 ? ((d.variance / d.actual_stock) * 100).toFixed(1) : null;
+              const varCls = !d.variance ? '' : d.variance > 0 ? 'color:#22c55e' : 'color:#ef4444';
+              const dt = new Date(d.reading_time);
+              const prevStock = d.actual_stock - (d.variance || 0);
+              return `<tr>
+                <td>${dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</td>
+                <td style="color:var(--text2)">${dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}</td>
+                <td><strong>${d.tank_name}</strong> <span style="font-size:10px;color:var(--text2)">${d.fuel_type}</span></td>
+                <td style="text-align:right;font-weight:700">${Math.round(d.calculated_litres).toLocaleString('en-IN')}</td>
+                <td style="text-align:right;color:var(--text2)">${Math.round(prevStock).toLocaleString('en-IN')}</td>
+                <td style="text-align:right;font-weight:700;${varCls}">${d.variance != null ? (d.variance > 0 ? '+' : '') + Math.round(d.variance) : '—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>` : `<div style="padding:24px;text-align:center;color:var(--text2);font-size:13px">No dip readings recorded yet</div>`}
+    </div>
+
+    <!-- ── Fuel Purchases table ─────────────────────────────────────────── -->
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:12px;overflow:hidden;margin-bottom:20px">
+      <div style="padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)">
+        <div style="font-weight:700;font-size:14px">🚛 Fuel Purchases</div>
+        <button onclick="renderStock('purchases')" style="padding:5px 12px;background:var(--surface2);border:1px solid var(--border2);color:var(--text2);border-radius:6px;cursor:pointer;font-size:11px">View All</button>
+      </div>
+      ${purchases.slice(0,15).length ? `
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr><th>DATE</th><th>FUEL</th><th style="text-align:right">QTY (L)</th><th style="text-align:right">RATE/L</th><th style="text-align:right">TOTAL</th><th>INVOICE</th><th>SUPPLIER</th></tr></thead>
+          <tbody>
+            ${purchases.slice(0,15).map(p => {
+              const cfg2 = FUEL_CFG[p.fuel_type] || FUEL_CFG.MS;
+              return `<tr>
+                <td>${p.purchase_date}</td>
+                <td><span style="padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;${cfg2.badge}">${p.display_name || p.tank_name}</span></td>
+                <td style="text-align:right">${(p.quantity||0).toLocaleString('en-IN')}</td>
+                <td style="text-align:right">₹${p.rate}</td>
+                <td style="text-align:right;font-weight:700">₹${fmt(p.total_amount)}</td>
+                <td style="color:var(--text2);font-size:12px">${p.invoice_no||'—'}</td>
+                <td style="color:var(--text2);font-size:12px">${p.supplier_name||'—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>` : `<div style="padding:24px;text-align:center;color:var(--text2);font-size:13px">No fuel purchases recorded yet</div>`}
     </div>`;
 }
 
-// ── DIP CHART EDITOR MODAL ─────────────────────────────────────────────────
+// ── ADD TANK MODAL ─────────────────────────────────────────────────────────
+function showAddTankModal(){
+  const o=document.createElement('div');
+  o.id='addTankModal';
+  o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  o.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:18px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto">
+      <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:18px;font-weight:800">🏷️ Add New Tank</div>
+        <button onclick="document.getElementById('addTankModal').remove()" style="background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="padding:24px">
+
+        <!-- Fuel Type -->
+        <div style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.8px;margin-bottom:10px">FUEL TYPE *</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:22px" id="atFuelTypes">
+          ${[
+            {type:'MS',  label:'Petrol',  sub:'Petrol (MS)',   dot:'#ef4444', sel:'rgba(239,68,68,.25)'},
+            {type:'HSD', label:'Diesel',  sub:'Diesel (HSD)',  dot:'#f97316', sel:'rgba(249,115,22,.25)'},
+            {type:'CNG', label:'CNG',     sub:'CNG (Gas)',     dot:'#3b82f6', sel:'rgba(59,130,246,.25)'},
+          ].map(f=>`
+            <button id="at_ft_${f.type}" onclick="atSelectFuel('${f.type}')"
+              style="padding:16px 10px;background:var(--surface2);border:2px solid var(--border2);border-radius:12px;cursor:pointer;text-align:center;transition:.15s">
+              <div style="width:22px;height:22px;border-radius:50%;background:${f.dot};margin:0 auto 8px"></div>
+              <div style="font-size:14px;font-weight:700;color:var(--text)">${f.label}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">${f.sub}</div>
+            </button>`).join('')}
+        </div>
+        <input type="hidden" id="at_fuel" value="MS"/>
+
+        <!-- Custom display name -->
+        <div style="margin-bottom:18px">
+          <label style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.8px;display:block;margin-bottom:6px">CUSTOM FUEL NAME <span style="font-weight:400">(optional — e.g. XP95 Premium)</span></label>
+          <input id="at_dname" placeholder="Leave blank to use default (Petrol / Diesel / CNG)" style="width:100%;padding:11px 13px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px;box-sizing:border-box"/>
+        </div>
+
+        <!-- Tank Capacity -->
+        <div style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.8px;margin-bottom:10px">TANK CAPACITY *</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:22px" id="atCapacities">
+          ${[
+            {val:10000, lbl:'10K', sub:'10,000 L', note:'Standard'},
+            {val:16000, lbl:'16K', sub:'16,000 L', note:'Medium'},
+            {val:20000, lbl:'20K', sub:'20,000 L', note:'Large'},
+          ].map(c=>`
+            <button id="at_cap_${c.val}" onclick="atSelectCap(${c.val})"
+              style="padding:16px 10px;background:var(--surface2);border:2px solid var(--border2);border-radius:12px;cursor:pointer;text-align:center;transition:.15s">
+              <div style="font-size:20px;font-weight:900;color:var(--accent)">${c.lbl}</div>
+              <div style="font-size:12px;color:var(--text);margin-top:4px">${c.sub}</div>
+              <div style="font-size:11px;color:var(--text2);margin-top:2px">${c.note}</div>
+            </button>`).join('')}
+        </div>
+        <div style="margin-bottom:18px">
+          <label style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.8px;display:block;margin-bottom:6px">CUSTOM CAPACITY <span style="font-weight:400">(or enter manually)</span></label>
+          <input type="number" id="at_cap" min="100" placeholder="e.g. 25000" style="width:100%;padding:11px 13px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px;box-sizing:border-box" oninput="atClearCapButtons()"/>
+        </div>
+
+        <!-- Current Level -->
+        <div style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.8px;margin-bottom:6px">CURRENT LEVEL (L) — STARTING STOCK</div>
+        <input type="number" id="at_stock" value="0" min="0" style="width:100%;padding:13px 16px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:22px;font-weight:700;box-sizing:border-box;margin-bottom:18px"/>
+
+        <!-- Min Alert -->
+        <div style="margin-bottom:8px">
+          <label style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.8px;display:block;margin-bottom:6px">LOW STOCK ALERT (L)</label>
+          <input type="number" id="at_alert" value="2000" min="0" style="width:100%;padding:11px 13px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px;box-sizing:border-box"/>
+        </div>
+      </div>
+      <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px">
+        <button onclick="document.getElementById('addTankModal').remove()" style="padding:11px 24px;background:var(--surface2);border:1px solid var(--border2);color:var(--text2);border-radius:8px;cursor:pointer;font-size:14px">Cancel</button>
+        <button onclick="submitAddTank()" style="flex:1;padding:11px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:14px">🏷️ Add Tank</button>
+      </div>
+    </div>`;
+  document.body.appendChild(o);
+  atSelectFuel('MS');
+  atSelectCap(10000);
+}
+function atSelectFuel(type){
+  document.getElementById('at_fuel').value=type;
+  ['MS','HSD','CNG'].forEach(t=>{
+    const b=document.getElementById(`at_ft_${t}`);
+    if(!b)return;
+    const cfg=FUEL_CFG[t];
+    b.style.borderColor = t===type ? cfg.dot : 'var(--border2)';
+    b.style.background  = t===type ? cfg.bg  : 'var(--surface2)';
+  });
+}
+function atSelectCap(val){
+  document.getElementById('at_cap').value=val;
+  [10000,16000,20000].forEach(v=>{
+    const b=document.getElementById(`at_cap_${v}`);
+    if(!b)return;
+    b.style.borderColor = v===val ? 'var(--accent)' : 'var(--border2)';
+    b.style.background  = v===val ? 'rgba(245,166,35,.12)' : 'var(--surface2)';
+  });
+}
+function atClearCapButtons(){
+  [10000,16000,20000].forEach(v=>{
+    const b=document.getElementById(`at_cap_${v}`);
+    if(b){ b.style.borderColor='var(--border2)'; b.style.background='var(--surface2)'; }
+  });
+}
+async function submitAddTank(){
+  const fuelType    = document.getElementById('at_fuel').value;
+  const displayName = document.getElementById('at_dname').value.trim();
+  const capacity    = parseFloat(document.getElementById('at_cap').value);
+  const currentStock= parseFloat(document.getElementById('at_stock').value||0);
+  const minAlert    = parseFloat(document.getElementById('at_alert').value||2000);
+  if(!capacity||capacity<100) return showToast('Enter a valid capacity (≥100L)','error');
+  // Auto-generate tank name
+  const tankName = displayName || (FUEL_CFG[fuelType]?.label||fuelType);
+  const res=await apiFetch('/api/tanks',{method:'POST',body:{tankName,fuelType,displayName:displayName||undefined,capacity,currentStock,minAlert}});
+  const data=await res.json();
+  if(!res.ok)return showToast(data.error,'error');
+  showToast('✓ Tank added','success');
+  document.getElementById('addTankModal').remove();
+  renderStock('tanks');
+}
+
+// ── EDIT TANK MODAL ────────────────────────────────────────────────────────
+function showEditTankModal(id, name, fuelType, capacity, minAlert, displayName){
+  const o=document.createElement('div');
+  o.id='editTankModal';
+  o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  o.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:440px">
+      <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:16px;font-weight:800">✏️ Edit Tank — ${name}</div>
+        <button onclick="document.getElementById('editTankModal').remove()" style="background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="padding:20px">
+        <div class="form-group"><label>Tank / Display Name</label>
+          <input id="et_name" value="${displayName||name}" placeholder="e.g. XP95 Premium or Tank 1"/></div>
+        <div class="form-group"><label>Capacity (L)</label>
+          <input type="number" id="et_cap" value="${capacity}" min="100"/></div>
+        <div class="form-group"><label>Low Stock Alert (L)</label>
+          <input type="number" id="et_alert" value="${minAlert}" min="0"/></div>
+        <div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:10px 14px;font-size:11px;color:#93c5fd">
+          Fuel type (${FUEL_CFG[fuelType]?.sub||fuelType}) cannot be changed after creation.
+        </div>
+      </div>
+      <div style="padding:12px 22px 20px;display:flex;gap:10px">
+        <button onclick="document.getElementById('editTankModal').remove()" style="padding:10px 20px;background:var(--surface2);border:1px solid var(--border2);color:var(--text2);border-radius:8px;cursor:pointer">Cancel</button>
+        <button onclick="submitEditTank(${id})" style="flex:1;padding:10px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:800;cursor:pointer">💾 Save Changes</button>
+      </div>
+    </div>`;
+  document.body.appendChild(o);
+}
+async function submitEditTank(id){
+  const name  = document.getElementById('et_name').value.trim();
+  const cap   = parseFloat(document.getElementById('et_cap').value);
+  const alert = parseFloat(document.getElementById('et_alert').value);
+  if(!name) return showToast('Name required','error');
+  const res=await apiFetch(`/api/tanks/${id}`,{method:'PUT',body:{tankName:name,displayName:name,capacity:cap,minAlert:alert}});
+  const data=await res.json();
+  if(!res.ok)return showToast(data.error,'error');
+  showToast('✓ Tank updated','success');
+  document.getElementById('editTankModal').remove();
+  renderStock('tanks');
+}
+
+// ── DELETE TANK ────────────────────────────────────────────────────────────
+async function deleteTank(id, name){
+  if(!confirm(`Delete tank "${name}"?\nThis will deactivate the tank. Cannot delete if it has recent sales.`)) return;
+  const res=await apiFetch(`/api/tanks/${id}`,{method:'DELETE'});
+  const data=await res.json();
+  if(!res.ok) return showToast(data.error,'error');
+  showToast('✓ Tank removed','success');
+  renderStock('tanks');
+}
+
+// ── DIP READING MODAL (CM + MM, matching screenshot) ──────────────────────
+async function showGlobalDipModal(){
+  // Show tank selector first
+  const tanksRes = await apiFetch('/api/tanks/dip-status');
+  const tanks = (await tanksRes.json()).data || [];
+  if(!tanks.length) return showToast('No tanks configured','error');
+  showDipReadingModal(tanks[0].id, tanks);
+}
+
+async function showDipReadingModal(tankId, tanksPreloaded){
+  // Load tanks if not provided
+  let tanks = tanksPreloaded;
+  if(!tanks){
+    const r = await apiFetch('/api/tanks/dip-status');
+    tanks = (await r.json()).data || [];
+  }
+  const tank = tanks.find(t=>t.id===tankId) || tanks[0];
+  if(!tank) return;
+  const cfg = FUEL_CFG[tank.fuel_type] || FUEL_CFG.MS;
+  const chartLabel = tank.chartPoints > 0
+    ? `🗂️ Chart — ${tank.capacity.toLocaleString('en-IN')}L (1–${Math.round(tank.capacity/100)} cm)`
+    : '⚠ No dip chart — manual litres entry only';
+
+  const o = document.createElement('div');
+  o.id = 'drModal';
+  o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  o.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:440px">
+      <!-- Header -->
+      <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800">📏 Record Dip Reading</div>
+        <button onclick="document.getElementById('drModal').remove()" style="background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;line-height:1">×</button>
+      </div>
+      <div style="padding:20px">
+
+        <!-- Tank selector -->
+        <div style="background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="drCycleTank(${JSON.stringify(tanks.map(t=>t.id))})">
+          <div style="width:10px;height:10px;border-radius:50%;background:${cfg.dot};flex-shrink:0"></div>
+          <div>
+            <div id="drTankLabel" style="font-weight:700;font-size:14px">${tank.tank_name} — ${tankLabel(tank)} (${tankSub(tank)})</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">Capacity: ${tank.capacity.toLocaleString('en-IN')} L &nbsp;·&nbsp; Current: ${Math.round(tank.current_stock).toLocaleString('en-IN')} L</div>
+          </div>
+        </div>
+        <input type="hidden" id="drTankId" value="${tank.id}"/>
+
+        <!-- Chart info badge -->
+        <div style="background:${tank.chartPoints>0?'rgba(245,166,35,.08)':'rgba(239,68,68,.06)'};border:1px solid ${tank.chartPoints>0?'rgba(245,166,35,.25)':'rgba(239,68,68,.2)'};border-radius:8px;padding:8px 14px;margin-bottom:18px;font-size:12px;font-weight:600;color:${tank.chartPoints>0?'var(--accent)':'#fca5a5'}">
+          ${chartLabel}
+          ${tank.chartPoints > 0 ? '<span style="font-weight:400;color:var(--text2);margin-left:6px">Enter dip rod reading → volume auto-calculated</span>' : ''}
+        </div>
+
+        ${tank.chartPoints > 0 ? `
+        <!-- CM + MM inputs (main reading method) -->
+        <div style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.8px;margin-bottom:10px;display:flex;gap:4px;align-items:center">
+          <span>DIP CM</span>
+          <span style="font-size:10px;color:var(--text3)">(0–${Math.round(tank.capacity/100)})</span>
+          <span style="margin-left:auto;color:var(--text3)">+ MM (0–9)</span>
+        </div>
+        <div style="display:flex;gap:10px;margin-bottom:16px;align-items:stretch">
+          <input type="number" id="drCm" min="0" max="${Math.round(tank.capacity/100)}" placeholder="e.g. 105"
+            style="flex:3;padding:18px 16px;background:var(--surface2);border:2px solid var(--border2);border-radius:10px;color:var(--text);font-size:28px;font-weight:700;outline:none;text-align:center"
+            oninput="drOnCmMmChange(${tank.id})"/>
+          <div style="flex:2;padding:18px 16px;background:var(--surface2);border:2px solid var(--border2);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
+            <div style="font-size:11px;color:var(--text2)">+ MM</div>
+            <select id="drMm" onchange="drOnCmMmChange(${tank.id})"
+              style="background:transparent;border:none;color:var(--text);font-size:22px;font-weight:700;cursor:pointer;text-align:center;outline:none;width:100%">
+              ${[0,1,2,3,4,5,6,7,8,9].map(v=>`<option value="${v}" style="background:var(--surface2)">${v} mm</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <!-- Live calculation result -->
+        <div id="drCalcResult" style="display:none;background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.2);border-radius:10px;padding:14px;margin-bottom:16px;text-align:center">
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">CALCULATED VOLUME</div>
+          <div id="drLitresDisplay" style="font-size:32px;font-weight:900;color:var(--accent)">—</div>
+          <div style="font-size:11px;color:var(--text2)">litres (from dip chart interpolation)</div>
+        </div>
+        ` : ''}
+
+        <!-- Manual litres override (always shown) -->
+        <div class="form-group">
+          <label>${tank.chartPoints>0?'Override / Manual Litres':'Available Litres'}</label>
+          <input type="number" id="drLitres" placeholder="Enter litres directly" min="0" style="font-size:18px;font-weight:700"/>
+        </div>
+
+        <div class="form-group">
+          <label>Notes (optional)</label>
+          <input type="text" id="drNotes" placeholder="e.g. Morning dip"/>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div style="padding:12px 22px 20px;display:flex;gap:10px">
+        <button onclick="document.getElementById('drModal').remove()" style="padding:10px 20px;background:var(--surface2);border:1px solid var(--border2);color:var(--text2);border-radius:8px;cursor:pointer;font-size:13px">Cancel</button>
+        <button onclick="submitDipReading2()" style="flex:1;padding:11px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:800;cursor:pointer;font-size:14px">💾 Save — Set Available Qty</button>
+      </div>
+    </div>`;
+  document.body.appendChild(o);
+}
+
+// Cycle tank selection in dip modal
+let _drTankIds=[], _drTankIdx=0, _drAllTanks=[];
+function drCycleTank(ids){
+  // Simple: refresh modal with next tank
+}
+
+let _drCalcTimer=null;
+async function drOnCmMmChange(tankId){
+  clearTimeout(_drCalcTimer);
+  _drCalcTimer=setTimeout(async()=>{
+    const cm = parseFloat(document.getElementById('drCm')?.value);
+    const mm = parseInt(document.getElementById('drMm')?.value||0);
+    if(isNaN(cm)||cm<0) return;
+    const totalMm = cm*10 + mm;
+    const res=await apiFetch('/api/tanks/mm-to-litres',{method:'POST',body:{tankId,mm:totalMm}});
+    const data=await res.json();
+    if(res.ok&&data.litres!=null){
+      document.getElementById('drLitresDisplay').textContent=Math.round(data.litres).toLocaleString('en-IN');
+      document.getElementById('drCalcResult').style.display='block';
+      document.getElementById('drLitres').value=data.litres;
+    }
+  },300);
+}
+
+async function submitDipReading2(){
+  const tankId  = parseInt(document.getElementById('drTankId')?.value);
+  const litresEl= document.getElementById('drLitres');
+  const cmEl    = document.getElementById('drCm');
+  const mmEl    = document.getElementById('drMm');
+  const notes   = document.getElementById('drNotes')?.value||'';
+  const litres  = parseFloat(litresEl?.value);
+  if(isNaN(litres)||litres<0) return showToast('Enter litres value','error');
+  // Compute total dipMm from cm+mm if provided
+  const cm=parseFloat(cmEl?.value);
+  const mm=parseInt(mmEl?.value||0);
+  const dipMm=!isNaN(cm)&&cm>0 ? cm*10+mm : null;
+  const body={tankId,calculatedLitres:litres,notes:notes||undefined};
+  if(dipMm) body.dipMm=dipMm;
+  const res=await apiFetch('/api/tanks/dip-reading',{method:'POST',body});
+  const data=await res.json();
+  if(!res.ok)return showToast(data.error,'error');
+  const v=data.variance;
+  const varStr=v!=null?(v>0?` ▲+${Math.abs(Math.round(v))}L`:` ▼${Math.abs(Math.round(v))}L`):'';
+  showToast(`✓ Dip saved — ${Math.round(litres).toLocaleString('en-IN')}L${varStr}`,'success');
+  document.getElementById('drModal')?.remove();
+  renderStock('tanks');
+}
+
+// ── DIP CHART EDITOR MODAL (preserved from Sprint 5) ──────────────────────
 async function showDipChartEditor(tankId, tankName, tankCapacity){
   const res=await apiFetch(`/api/tanks/${tankId}/dip-chart`);
   const {data}=await res.json();
   const rows=data.rows||[];
-
-  // Build row HTML
   function rowHtml(mm='',litres='',idx){
     return`<tr id="dcr_${idx}">
-      <td><input type="number" id="dc_mm_${idx}" value="${mm}" min="0" placeholder="mm" style="width:90px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px" oninput="dcAutoFill(${idx},${tankCapacity})"/></td>
+      <td><input type="number" id="dc_mm_${idx}" value="${mm}" min="0" placeholder="mm" style="width:90px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px"/></td>
       <td><input type="number" id="dc_l_${idx}" value="${litres}" min="0" placeholder="litres" style="width:110px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px"/></td>
       <td><button onclick="removeDcRow(${idx})" style="background:var(--red-dim);color:#fca5a5;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px">✕</button></td>
     </tr>`;
   }
-
   let rowCount=Math.max(rows.length,5);
   let rowsHtml=rows.map((r,i)=>rowHtml(r.mm_level,r.litres_volume,i)).join('');
-  // Add blank rows up to 5
   for(let i=rows.length;i<5;i++) rowsHtml+=rowHtml('','',i);
-
   const overlay=document.createElement('div');
   overlay.id='dcModal';
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
@@ -1203,33 +1602,28 @@ async function showDipChartEditor(tankId, tankName, tankCapacity){
         <div style="font-size:11px;color:var(--text2);margin-top:2px">Map dip rod mm readings to litres in tank</div></div>
         <button onclick="document.getElementById('dcModal').remove()" style="background:var(--surface2);border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px">✕</button>
       </div>
-
-      <!-- Standard Chart Import -->
       <div style="padding:12px 20px;background:rgba(245,166,35,.06);border-bottom:1px solid var(--border)">
-        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px">⚡ Quick Import — Standard Cylindrical Tank Chart</div>
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px">⚡ Quick Import — Standard Cylindrical Tank</div>
         <div style="display:flex;gap:8px;align-items:flex-end">
-          <div style="flex:1"><label style="font-size:11px;color:var(--text2)">Tank Capacity (L)</label>
-            <input type="number" id="dcImportCap" value="${tankCapacity}" placeholder="${tankCapacity}" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;margin-top:3px"/></div>
-          <div style="flex:1"><label style="font-size:11px;color:var(--text2)">Tank Height (mm)</label>
-            <input type="number" id="dcImportHeight" value="1800" placeholder="1800" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;margin-top:3px"/></div>
-          <button onclick="dcImportStandard()" style="background:var(--accent);color:#000;border:none;padding:8px 14px;border-radius:7px;font-weight:700;cursor:pointer;white-space:nowrap;font-size:12px">Import Chart</button>
+          <div style="flex:1"><label style="font-size:11px;color:var(--text2)">Capacity (L)</label>
+            <input type="number" id="dcImportCap" value="${tankCapacity}" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;margin-top:3px"/></div>
+          <div style="flex:1"><label style="font-size:11px;color:var(--text2)">Height (mm)</label>
+            <input type="number" id="dcImportHeight" value="1800" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;margin-top:3px"/></div>
+          <button onclick="dcImportStandard()" style="background:var(--accent);color:#000;border:none;padding:8px 14px;border-radius:7px;font-weight:700;cursor:pointer;white-space:nowrap;font-size:12px">Import</button>
         </div>
       </div>
-
       <div style="padding:16px 20px">
-        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Enter calibration points — system uses linear interpolation between points.</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Calibration points — linear interpolation between them.</div>
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr>
             <th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--text2);font-weight:700">DIP (mm)</th>
-            <th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--text2);font-weight:700">LITRES IN TANK</th>
-            <th></th>
+            <th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--text2);font-weight:700">LITRES IN TANK</th><th></th>
           </tr></thead>
           <tbody id="dcRows">${rowsHtml}</tbody>
         </table></div>
         <button onclick="dcAddRow()" style="margin-top:10px;background:var(--surface2);border:1px dashed var(--border2);color:var(--text2);padding:7px 16px;border-radius:7px;cursor:pointer;width:100%;font-size:12px">+ Add Row</button>
       </div>
-
       <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:10px">
         <button onclick="saveDipChart(${tankId})" style="flex:1;background:var(--accent);color:#000;border:none;padding:10px;border-radius:8px;font-weight:800;cursor:pointer;font-size:13px">💾 Save Dip Chart</button>
         <button onclick="document.getElementById('dcModal').remove()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text2);padding:10px 20px;border-radius:8px;cursor:pointer;font-size:13px">Cancel</button>
@@ -1250,26 +1644,17 @@ function dcAddRow(){
   tbody.appendChild(tr);
 }
 function removeDcRow(idx){ const r=document.getElementById(`dcr_${idx}`); if(r) r.remove(); }
-function dcAutoFill(idx, capacity){
-  // If user enters mm, optionally hint — no auto-fill needed (user provides calibration)
-}
 function dcImportStandard(){
   const cap=parseFloat(document.getElementById('dcImportCap').value)||20000;
   const height=parseFloat(document.getElementById('dcImportHeight').value)||1800;
-  // Generate standard cylindrical tank chart (simplified linear for now — real tanks use tank-specific charts)
-  // For a horizontal cylindrical tank: use partial circle area formula
-  const R=height/2; // radius in mm
+  const R=height/2;
   const points=[];
   for(let step=0;step<=20;step++){
     const h=(step/20)*height;
-    // Horizontal cylinder: A = R²·arccos((R-h)/R) - (R-h)·√(2Rh-h²)
-    const ratio=Math.max(0,Math.min(1,(R-h+0.001)/R));
     const area=R*R*Math.acos((R-h)/R)-(R-h)*Math.sqrt(Math.max(0,2*R*h-h*h));
-    // area/π*R² gives fraction; total vol = πR²L → litres = area × L
     const fraction=area/(Math.PI*R*R);
     points.push({mm:Math.round(h), litres:Math.round(cap*fraction)});
   }
-  // Render into table
   const tbody=document.getElementById('dcRows');
   tbody.innerHTML='';
   window._dcRowCount=points.length;
@@ -1281,7 +1666,7 @@ function dcImportStandard(){
       <td><button onclick="removeDcRow(${i})" style="background:var(--red-dim);color:#fca5a5;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px">✕</button></td>`;
     tbody.appendChild(tr);
   });
-  showToast(`Standard chart generated (${points.length} points) — verify with actual calibration data`,'info');
+  showToast(`Standard chart generated — verify with actual calibration data`,'info');
 }
 async function saveDipChart(tankId){
   const rows=[];
@@ -1300,79 +1685,8 @@ async function saveDipChart(tankId){
   renderStock('tanks');
 }
 
-// ── DIP READING MODAL ──────────────────────────────────────────────────────
-function showDipReadingForm(tankId, tankName, hasChart){
-  const overlay=document.createElement('div');
-  overlay.id='drModal';
-  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-  overlay.innerHTML=`
-    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:420px">
-      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <div style="font-weight:800;font-size:16px">📏 Dip Reading — ${tankName}</div>
-        <button onclick="document.getElementById('drModal').remove()" style="background:var(--surface2);border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px">✕</button>
-      </div>
-      <div style="padding:20px">
-        ${hasChart?`
-        <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.25);border-radius:8px;padding:10px 14px;margin-bottom:14px">
-          <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:4px">🎯 AUTO-CONVERT MODE</div>
-          <div style="font-size:11px;color:var(--text2)">Enter mm reading → litres calculated from dip chart automatically</div>
-        </div>
-        <div class="form-group">
-          <label>Dip Rod Reading (mm)</label>
-          <input type="number" id="drMm" placeholder="e.g. 850" min="0" oninput="drConvertMm(${tankId})" style="font-size:20px;font-weight:700"/>
-        </div>
-        <div id="drConvertResult" style="display:none;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:14px;text-align:center">
-          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">CALCULATED VOLUME</div>
-          <div id="drLitresDisplay" style="font-size:28px;font-weight:800;color:var(--accent)">—</div>
-          <div style="font-size:11px;color:var(--text2)">litres (from dip chart)</div>
-        </div>`:``}
-        <div class="form-group">
-          <label>Litres (${hasChart?'auto-filled or manual override':'enter manually'})</label>
-          <input type="number" id="drLitres" placeholder="e.g. 9400" min="0"/>
-        </div>
-        <div class="form-group">
-          <label>Notes (optional)</label>
-          <input type="text" id="drNotes" placeholder="e.g. Morning reading"/>
-        </div>
-      </div>
-      <div style="padding:0 20px 20px;display:flex;gap:10px">
-        <button onclick="submitDipReading(${tankId},${hasChart})" style="flex:1;background:var(--accent);color:#000;border:none;padding:11px;border-radius:8px;font-weight:800;cursor:pointer;font-size:14px">💾 Save Reading</button>
-        <button onclick="document.getElementById('drModal').remove()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text2);padding:11px 20px;border-radius:8px;cursor:pointer">Cancel</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-}
-let _drConvertTimer=null;
-async function drConvertMm(tankId){
-  clearTimeout(_drConvertTimer);
-  _drConvertTimer=setTimeout(async()=>{
-    const mm=parseFloat(document.getElementById('drMm')?.value);
-    if(isNaN(mm)||mm<0)return;
-    const res=await apiFetch('/api/tanks/mm-to-litres',{method:'POST',body:{tankId,mm}});
-    const data=await res.json();
-    if(res.ok&&data.litres!=null){
-      document.getElementById('drLitresDisplay').textContent=data.litres.toFixed(1);
-      document.getElementById('drConvertResult').style.display='block';
-      document.getElementById('drLitres').value=data.litres;
-    }
-  },400);
-}
-async function submitDipReading(tankId, hasChart){
-  const dipMm=hasChart?parseFloat(document.getElementById('drMm')?.value)||null:null;
-  const calculatedLitres=parseFloat(document.getElementById('drLitres').value);
-  const notes=document.getElementById('drNotes').value;
-  if(isNaN(calculatedLitres)||calculatedLitres<=0)return showToast('Enter litres value','error');
-  const body={tankId,calculatedLitres,notes:notes||undefined};
-  if(dipMm) body.dipMm=dipMm;
-  // Use original endpoint (supports both mm+litres)
-  const res=await apiFetch('/api/tanks/dip-reading',{method:'POST',body});
-  const data=await res.json();
-  if(!res.ok)return showToast(data.error,'error');
-  const varStr=data.variance!=null?(data.variance>0?` (▲+${Math.abs(data.variance).toFixed(0)}L vs prev)`:` (▼${Math.abs(data.variance).toFixed(0)}L vs prev)`):'';
-  showToast(`✓ Dip reading saved — ${calculatedLitres}L${varStr}`,'success');
-  document.getElementById('drModal')?.remove();
-  renderStock('tanks');
-}
+// Keep legacy submitDipReading alias so any stale refs don't crash
+async function submitDipReading(tankId){ await submitDipReading2(); }
 
 // ── TAB 2: LUBES & PRODUCTS ────────────────────────────────────────────────
 async function _renderLubesTab(){

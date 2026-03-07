@@ -112,11 +112,13 @@ async function initSchema() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
       tank_name TEXT NOT NULL, fuel_type TEXT NOT NULL CHECK(fuel_type IN ('MS','HSD','CNG')),
+      display_name TEXT,
       capacity REAL NOT NULL, current_stock REAL NOT NULL DEFAULT 0,
       min_alert REAL NOT NULL DEFAULT 2000, is_active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
+    `ALTER TABLE tanks ADD COLUMN display_name TEXT`,
     `CREATE TABLE IF NOT EXISTS nozzles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
