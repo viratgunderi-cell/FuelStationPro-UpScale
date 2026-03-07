@@ -339,6 +339,12 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .movement-card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:14px}
 .movement-header{padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
 .movement-title{font-weight:700;font-size:13px}
+/* Sprint 5 — Dip chart & products */
+.prod-cat-icon{font-size:16px;margin-right:6px}
+.stock-level-bar{height:5px;border-radius:3px;transition:width .3s}
+.dip-table-wrap{overflow-x:auto}
+.dip-chart-empty{background:rgba(239,68,68,.08);border:1px dashed rgba(239,68,68,.3);border-radius:8px;padding:12px 16px;font-size:12px;color:#fca5a5;text-align:center}
+.dip-chart-ok{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:8px 14px;font-size:12px;color:var(--green)}
 .recon-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px}
 .recon-app{display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px}
 .recon-expected{font-size:14px;font-weight:700}
@@ -797,7 +803,7 @@ const pageMeta = {
   dashboard:{title:'Dashboard',sub:''},
   sale:{title:'Quick Sale',sub:'Record fuel transactions'},
   shifts:{title:'Shifts',sub:'Manage staff shifts'},
-  stock:{title:'Tanks & Inventory',sub:'Stock levels & purchases'},
+  stock:{title:'Tanks, Dip Chart & Lubes',sub:'Stock · Dip Chart · Products'},
   credit:{title:'Credit Management',sub:'Customer outstanding'},
   payroll:{title:'Staff & Payroll',sub:'Attendance, salary, advances'},
   upi:{title:'UPI Reconciliation',sub:'PhonePe · GPay · Paytm vs bank'},
@@ -1051,55 +1057,699 @@ async function closeShift(id){
   shiftId=null; showToast(`✓ Shift closed. Variance: ₹${data.variance}`,'success'); renderShifts();
 }
 
-// ── STOCK (Sprint 1: +Movement Table) ─────────────────────────────────────
-async function renderStock(){
-  const today=new Date().toISOString().slice(0,10);
-  const [stockRes,suppRes,movRes]=await Promise.all([apiFetch('/api/reports/stock'),apiFetch('/api/purchases/suppliers'),apiFetch(`/api/reports/stock-movement?date=${today}`)]);
-  const {data}=await stockRes.json(); const suppliers=(await suppRes.json()).data||[];
-  const mov=(await movRes.json()).data||{movements:[]};
+// ══════════════════════════════════════════════════════════════════════════
+// SPRINT 5 — STOCK PAGE: 3 TABS (Tanks & Dip, Lubes & Products, Purchases)
+// ══════════════════════════════════════════════════════════════════════════
+let _stockTab='tanks'; // persist active tab across re-renders
+async function renderStock(tab){
+  if(tab) _stockTab=tab;
   const c=document.getElementById('mainContent');
+  c.innerHTML=`<div class="spinner"></div>`;
+  const today=new Date().toISOString().slice(0,10);
+
+  // ── Tab Shell ──────────────────────────────────────────────────────────
   c.innerHTML=`
-    <div class="export-bar">
-      <button class="btn-sm btn-pdf" onclick="exportStockPDF('${today}')">📄 Export PDF</button>
-      <button class="btn-sm btn-excel" onclick="exportStockExcel('${today}')">📊 Export Excel</button>
+    <div class="wa-tabs" style="margin-bottom:0">
+      <button class="wa-tab ${_stockTab==='tanks'?'active':''}" onclick="renderStock('tanks')">⛽ Tanks & Dip</button>
+      <button class="wa-tab ${_stockTab==='lubes'?'active':''}" onclick="renderStock('lubes')">🛢️ Lubes & Products</button>
+      <button class="wa-tab ${_stockTab==='purchases'?'active':''}" onclick="renderStock('purchases')">🚛 Purchases</button>
     </div>
-    <div class="section-title">Stock Movement — Today</div>
+    <div id="stockTabContent"></div>`;
+
+  if(_stockTab==='tanks') await _renderTanksTab(today);
+  else if(_stockTab==='lubes') await _renderLubesTab();
+  else await _renderPurchasesTab(today);
+}
+
+// ── TAB 1: TANKS & DIP CHART ───────────────────────────────────────────────
+async function _renderTanksTab(today){
+  const [dipStatusRes,movRes]=await Promise.all([apiFetch('/api/tanks/dip-status'),apiFetch(`/api/reports/stock-movement?date=${today}`)]);
+  const tanks=(await dipStatusRes.json()).data||[];
+  const mov=(await movRes.json()).data||{movements:[]};
+  const tc=document.getElementById('stockTabContent');
+  tc.innerHTML=`
+    <div class="export-bar" style="margin-top:8px">
+      <button class="btn-sm btn-pdf" onclick="exportStockPDF('${today}')">📄 PDF</button>
+      <button class="btn-sm btn-excel" onclick="exportStockExcel('${today}')">📊 Excel</button>
+    </div>
+    <!-- Stock Movement Today -->
+    <div class="section-title">Stock Movement — ${today}</div>
     <div class="movement-card">
-      <div class="movement-header"><span class="movement-title">Opening → Sales → Purchase → Closing</span><span style="font-size:12px;color:var(--text2)">${today}</span></div>
-      <div style="overflow-x:auto;padding:0 4px">
+      <div class="movement-header"><span class="movement-title">Opening → Purchases → Sales → Closing</span></div>
+      <div style="overflow-x:auto">
       <table class="data-table">
-        <thead><tr><th>Tank</th><th>Opening</th><th>Received</th><th>Sold</th><th>Closing</th><th>Variance</th></tr></thead>
+        <thead><tr><th>Tank</th><th>Opening</th><th>+Received</th><th>−Sold</th><th>Closing</th><th>Variance</th></tr></thead>
         <tbody>
-          ${mov.movements.map(m=>{
-            const varClass=Math.abs(m.variance||0)>50?'neg':'pos';
-            return `<tr><td><strong>${m.tankName}</strong><br><span style="font-size:10px;color:var(--text2)">${m.fuelType}</span></td><td>${m.opening.toFixed(0)}L</td><td class="${m.received>0?'pos':''}">${m.received>0?'+'+m.received.toFixed(0)+'L':'—'}</td><td>${m.sold.toFixed(0)}L</td><td><strong>${m.closing.toFixed(0)}L</strong></td><td class="${varClass}">${(m.variance||0)>0?'+':''}${(m.variance||0).toFixed(1)}L</td></tr>`;
-          }).join('')}
-          <tr class="total-row"><td>TOTAL</td><td>${mov.movements.reduce((a,b)=>a+b.opening,0).toFixed(0)}L</td><td>${mov.movements.reduce((a,b)=>a+b.received,0).toFixed(0)}L</td><td>${mov.movements.reduce((a,b)=>a+b.sold,0).toFixed(0)}L</td><td>${mov.movements.reduce((a,b)=>a+b.closing,0).toFixed(0)}L</td><td></td></tr>
+          ${mov.movements.map(m=>{const vc=Math.abs(m.variance||0)>50?'neg':'pos';return`<tr>
+            <td><strong>${m.tankName}</strong><br><span style="font-size:10px;color:var(--text2)">${m.fuelType}</span></td>
+            <td>${m.opening.toFixed(0)}L</td>
+            <td class="${m.received>0?'pos':''}">${m.received>0?'+'+m.received.toFixed(0)+'L':'—'}</td>
+            <td>${m.sold.toFixed(0)}L</td>
+            <td><strong>${m.closing.toFixed(0)}L</strong></td>
+            <td class="${vc}">${(m.variance||0)>0?'+':''}${(m.variance||0).toFixed(1)}L</td>
+          </tr>`;}).join('')}
+          <tr class="total-row"><td>TOTAL</td>
+            <td>${mov.movements.reduce((a,b)=>a+b.opening,0).toFixed(0)}L</td>
+            <td>${mov.movements.reduce((a,b)=>a+b.received,0).toFixed(0)}L</td>
+            <td>${mov.movements.reduce((a,b)=>a+b.sold,0).toFixed(0)}L</td>
+            <td>${mov.movements.reduce((a,b)=>a+b.closing,0).toFixed(0)}L</td>
+            <td></td></tr>
         </tbody>
       </table></div>
     </div>
-    <div class="section-title" style="margin-top:8px">Current Tank Levels</div>
-    ${(data.tanks||[]).map(t=>{const pct=Math.round((t.current_stock/t.capacity)*100);const cls=t.fuel_type==='MS'?'fuel-ms':t.fuel_type==='HSD'?'fuel-hsd':'fuel-cng';return `<div class="card"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-weight:700">${t.tank_name}</span><span class="badge badge-${t.fuel_type.toLowerCase()}">${t.fuel_type}</span></div><div class="progress-track" style="margin-bottom:8px"><div class="progress-fill ${cls}" style="width:${Math.max(2,pct)}%"></div></div><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2)"><span>${t.current_stock.toFixed(0)}L available</span><span>${pct}% of ${t.capacity}L capacity</span></div></div>`;}).join('')}
-    <div class="section-title" style="margin-top:8px">Add Purchase</div>
-    <div class="card">
-      <div class="form-group"><label>Tank</label><select id="pTank">${(data.tanks||[]).map(t=>`<option value="${t.id}">${t.tank_name} (${t.fuel_type})</option>`).join('')}</select></div>
-      <div class="form-group"><label>Supplier</label><select id="pSupp"><option value="">None</option>${suppliers.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Quantity (Litres)</label><input type="number" id="pQty" placeholder="e.g. 10000"/></div>
-      <div class="form-group"><label>Rate per Litre (₹)</label><input type="number" id="pRate" placeholder="e.g. 65.50"/></div>
-      <div class="form-group"><label>Invoice No (optional)</label><input type="text" id="pInv"/></div>
-      <button class="btn btn-primary" onclick="addPurchase()">Add Purchase</button>
+
+    <!-- Tank Cards -->
+    <div class="section-title" style="margin-top:12px">Tank Levels & Dip Chart Status</div>
+    <div class="tanks-grid">
+      ${tanks.map(t=>{
+        const pct=Math.min(100,Math.round((t.current_stock/t.capacity)*100));
+        const lvl=pct<15?'low':pct<40?'med':'ok';
+        const lvlColor=lvl==='low'?'var(--red)':lvl==='med'?'var(--yellow)':'var(--green)';
+        const fuelCls=t.fuel_type==='MS'?'fuel-ms':t.fuel_type==='HSD'?'fuel-hsd':'fuel-cng';
+        const chartBadge=t.chartPoints>0
+          ?`<span style="background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3);font-size:10px;padding:2px 7px;border-radius:5px;font-weight:700">📐 ${t.chartPoints} pts</span>`
+          :`<span style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.25);font-size:10px;padding:2px 7px;border-radius:5px">No chart</span>`;
+        const lastDip=t.lastReading?`Last dip: ${new Date(t.lastReading.reading_time).toLocaleDateString('en-IN')} · ${t.lastReading.calculated_litres?.toFixed(0)}L`:'No dip readings yet';
+        return`<div class="tank-card">
+          <div class="tank-card-head">
+            <div><div class="tank-card-name">${t.tank_name}</div><div style="font-size:10px;color:var(--text2);margin-top:2px">${lastDip}</div></div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+              <span class="tank-card-fuel badge-${t.fuel_type.toLowerCase()}">${t.fuel_type}</span>
+              ${chartBadge}
+            </div>
+          </div>
+          <div class="tank-card-body">
+            <div class="tank-volume">${t.current_stock.toFixed(0)}<span>L</span></div>
+            <div class="tank-cap">Capacity: ${t.capacity.toLocaleString('en-IN')}L · Empty: ${(t.capacity-t.current_stock).toFixed(0)}L</div>
+          </div>
+          <div class="tank-progress-wrap">
+            <div class="tank-progress-row">
+              <span class="tank-pct-label" style="color:${lvlColor}">${lvl==='low'?'⚡ LOW STOCK':lvl==='med'?'⚠ MEDIUM':'✓ OK'}</span>
+              <span class="tank-pct-label">${pct}%</span>
+            </div>
+            <div class="progress-track"><div class="progress-fill ${fuelCls}" style="width:${Math.max(2,pct)}%"></div></div>
+          </div>
+          <div class="tank-card-foot">
+            <button class="btn-sm" style="flex:1;background:var(--surface2);color:var(--text);border:1px solid var(--border2)" onclick="showDipChartEditor(${t.id},'${t.tank_name}',${t.capacity})">📐 Dip Chart</button>
+            <button class="btn-sm" style="flex:1;background:var(--accent);color:#000;font-weight:700;border:none" onclick="showDipReadingForm(${t.id},'${t.tank_name}',${t.chartPoints>0})">📏 Dip Reading</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// ── DIP CHART EDITOR MODAL ─────────────────────────────────────────────────
+async function showDipChartEditor(tankId, tankName, tankCapacity){
+  const res=await apiFetch(`/api/tanks/${tankId}/dip-chart`);
+  const {data}=await res.json();
+  const rows=data.rows||[];
+
+  // Build row HTML
+  function rowHtml(mm='',litres='',idx){
+    return`<tr id="dcr_${idx}">
+      <td><input type="number" id="dc_mm_${idx}" value="${mm}" min="0" placeholder="mm" style="width:90px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px" oninput="dcAutoFill(${idx},${tankCapacity})"/></td>
+      <td><input type="number" id="dc_l_${idx}" value="${litres}" min="0" placeholder="litres" style="width:110px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px"/></td>
+      <td><button onclick="removeDcRow(${idx})" style="background:var(--red-dim);color:#fca5a5;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px">✕</button></td>
+    </tr>`;
+  }
+
+  let rowCount=Math.max(rows.length,5);
+  let rowsHtml=rows.map((r,i)=>rowHtml(r.mm_level,r.litres_volume,i)).join('');
+  // Add blank rows up to 5
+  for(let i=rows.length;i<5;i++) rowsHtml+=rowHtml('','',i);
+
+  const overlay=document.createElement('div');
+  overlay.id='dcModal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-weight:800;font-size:16px">📐 Dip Chart — ${tankName}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px">Map dip rod mm readings to litres in tank</div></div>
+        <button onclick="document.getElementById('dcModal').remove()" style="background:var(--surface2);border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px">✕</button>
+      </div>
+
+      <!-- Standard Chart Import -->
+      <div style="padding:12px 20px;background:rgba(245,166,35,.06);border-bottom:1px solid var(--border)">
+        <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:8px">⚡ Quick Import — Standard Cylindrical Tank Chart</div>
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <div style="flex:1"><label style="font-size:11px;color:var(--text2)">Tank Capacity (L)</label>
+            <input type="number" id="dcImportCap" value="${tankCapacity}" placeholder="${tankCapacity}" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;margin-top:3px"/></div>
+          <div style="flex:1"><label style="font-size:11px;color:var(--text2)">Tank Height (mm)</label>
+            <input type="number" id="dcImportHeight" value="1800" placeholder="1800" style="width:100%;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;margin-top:3px"/></div>
+          <button onclick="dcImportStandard()" style="background:var(--accent);color:#000;border:none;padding:8px 14px;border-radius:7px;font-weight:700;cursor:pointer;white-space:nowrap;font-size:12px">Import Chart</button>
+        </div>
+      </div>
+
+      <div style="padding:16px 20px">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Enter calibration points — system uses linear interpolation between points.</div>
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr>
+            <th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--text2);font-weight:700">DIP (mm)</th>
+            <th style="text-align:left;padding:6px 4px;font-size:11px;color:var(--text2);font-weight:700">LITRES IN TANK</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="dcRows">${rowsHtml}</tbody>
+        </table></div>
+        <button onclick="dcAddRow()" style="margin-top:10px;background:var(--surface2);border:1px dashed var(--border2);color:var(--text2);padding:7px 16px;border-radius:7px;cursor:pointer;width:100%;font-size:12px">+ Add Row</button>
+      </div>
+
+      <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:10px">
+        <button onclick="saveDipChart(${tankId})" style="flex:1;background:var(--accent);color:#000;border:none;padding:10px;border-radius:8px;font-weight:800;cursor:pointer;font-size:13px">💾 Save Dip Chart</button>
+        <button onclick="document.getElementById('dcModal').remove()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text2);padding:10px 20px;border-radius:8px;cursor:pointer;font-size:13px">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  window._dcRowCount=rowCount;
+}
+let _dcRowCount=5;
+function dcAddRow(){
+  const tbody=document.getElementById('dcRows');
+  const idx=window._dcRowCount++;
+  const tr=document.createElement('tr');
+  tr.id=`dcr_${idx}`;
+  tr.innerHTML=`<td><input type="number" id="dc_mm_${idx}" min="0" placeholder="mm" style="width:90px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px"/></td>
+    <td><input type="number" id="dc_l_${idx}" min="0" placeholder="litres" style="width:110px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px"/></td>
+    <td><button onclick="removeDcRow(${idx})" style="background:var(--red-dim);color:#fca5a5;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+function removeDcRow(idx){ const r=document.getElementById(`dcr_${idx}`); if(r) r.remove(); }
+function dcAutoFill(idx, capacity){
+  // If user enters mm, optionally hint — no auto-fill needed (user provides calibration)
+}
+function dcImportStandard(){
+  const cap=parseFloat(document.getElementById('dcImportCap').value)||20000;
+  const height=parseFloat(document.getElementById('dcImportHeight').value)||1800;
+  // Generate standard cylindrical tank chart (simplified linear for now — real tanks use tank-specific charts)
+  // For a horizontal cylindrical tank: use partial circle area formula
+  const R=height/2; // radius in mm
+  const points=[];
+  for(let step=0;step<=20;step++){
+    const h=(step/20)*height;
+    // Horizontal cylinder: A = R²·arccos((R-h)/R) - (R-h)·√(2Rh-h²)
+    const ratio=Math.max(0,Math.min(1,(R-h+0.001)/R));
+    const area=R*R*Math.acos((R-h)/R)-(R-h)*Math.sqrt(Math.max(0,2*R*h-h*h));
+    // area/π*R² gives fraction; total vol = πR²L → litres = area × L
+    const fraction=area/(Math.PI*R*R);
+    points.push({mm:Math.round(h), litres:Math.round(cap*fraction)});
+  }
+  // Render into table
+  const tbody=document.getElementById('dcRows');
+  tbody.innerHTML='';
+  window._dcRowCount=points.length;
+  points.forEach((p,i)=>{
+    const tr=document.createElement('tr');
+    tr.id=`dcr_${i}`;
+    tr.innerHTML=`<td><input type="number" id="dc_mm_${i}" value="${p.mm}" min="0" style="width:90px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px"/></td>
+      <td><input type="number" id="dc_l_${i}" value="${p.litres}" min="0" style="width:110px;background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px"/></td>
+      <td><button onclick="removeDcRow(${i})" style="background:var(--red-dim);color:#fca5a5;border:none;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:12px">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+  showToast(`Standard chart generated (${points.length} points) — verify with actual calibration data`,'info');
+}
+async function saveDipChart(tankId){
+  const rows=[];
+  document.querySelectorAll('#dcRows tr').forEach(tr=>{
+    const id=tr.id?.replace('dcr_','');
+    const mmEl=document.getElementById(`dc_mm_${id}`), lEl=document.getElementById(`dc_l_${id}`);
+    if(mmEl&&lEl){const mm=parseFloat(mmEl.value),litres=parseFloat(lEl.value);if(!isNaN(mm)&&!isNaN(litres)&&mm>=0&&litres>=0)rows.push({mm,litres});}
+  });
+  if(rows.length<2)return showToast('Need at least 2 calibration points','error');
+  rows.sort((a,b)=>a.mm-b.mm);
+  const res=await apiFetch(`/api/tanks/${tankId}/dip-chart`,{method:'POST',body:{rows}});
+  const data=await res.json();
+  if(!res.ok)return showToast(data.error,'error');
+  showToast(`✓ Dip chart saved — ${data.data?.length} points`,'success');
+  document.getElementById('dcModal')?.remove();
+  renderStock('tanks');
+}
+
+// ── DIP READING MODAL ──────────────────────────────────────────────────────
+function showDipReadingForm(tankId, tankName, hasChart){
+  const overlay=document.createElement('div');
+  overlay.id='drModal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:420px">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:800;font-size:16px">📏 Dip Reading — ${tankName}</div>
+        <button onclick="document.getElementById('drModal').remove()" style="background:var(--surface2);border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px">✕</button>
+      </div>
+      <div style="padding:20px">
+        ${hasChart?`
+        <div style="background:rgba(245,166,35,.08);border:1px solid rgba(245,166,35,.25);border-radius:8px;padding:10px 14px;margin-bottom:14px">
+          <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:4px">🎯 AUTO-CONVERT MODE</div>
+          <div style="font-size:11px;color:var(--text2)">Enter mm reading → litres calculated from dip chart automatically</div>
+        </div>
+        <div class="form-group">
+          <label>Dip Rod Reading (mm)</label>
+          <input type="number" id="drMm" placeholder="e.g. 850" min="0" oninput="drConvertMm(${tankId})" style="font-size:20px;font-weight:700"/>
+        </div>
+        <div id="drConvertResult" style="display:none;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:14px;text-align:center">
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">CALCULATED VOLUME</div>
+          <div id="drLitresDisplay" style="font-size:28px;font-weight:800;color:var(--accent)">—</div>
+          <div style="font-size:11px;color:var(--text2)">litres (from dip chart)</div>
+        </div>`:``}
+        <div class="form-group">
+          <label>Litres (${hasChart?'auto-filled or manual override':'enter manually'})</label>
+          <input type="number" id="drLitres" placeholder="e.g. 9400" min="0"/>
+        </div>
+        <div class="form-group">
+          <label>Notes (optional)</label>
+          <input type="text" id="drNotes" placeholder="e.g. Morning reading"/>
+        </div>
+      </div>
+      <div style="padding:0 20px 20px;display:flex;gap:10px">
+        <button onclick="submitDipReading(${tankId},${hasChart})" style="flex:1;background:var(--accent);color:#000;border:none;padding:11px;border-radius:8px;font-weight:800;cursor:pointer;font-size:14px">💾 Save Reading</button>
+        <button onclick="document.getElementById('drModal').remove()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text2);padding:11px 20px;border-radius:8px;cursor:pointer">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+let _drConvertTimer=null;
+async function drConvertMm(tankId){
+  clearTimeout(_drConvertTimer);
+  _drConvertTimer=setTimeout(async()=>{
+    const mm=parseFloat(document.getElementById('drMm')?.value);
+    if(isNaN(mm)||mm<0)return;
+    const res=await apiFetch('/api/tanks/mm-to-litres',{method:'POST',body:{tankId,mm}});
+    const data=await res.json();
+    if(res.ok&&data.litres!=null){
+      document.getElementById('drLitresDisplay').textContent=data.litres.toFixed(1);
+      document.getElementById('drConvertResult').style.display='block';
+      document.getElementById('drLitres').value=data.litres;
+    }
+  },400);
+}
+async function submitDipReading(tankId, hasChart){
+  const dipMm=hasChart?parseFloat(document.getElementById('drMm')?.value)||null:null;
+  const calculatedLitres=parseFloat(document.getElementById('drLitres').value);
+  const notes=document.getElementById('drNotes').value;
+  if(isNaN(calculatedLitres)||calculatedLitres<=0)return showToast('Enter litres value','error');
+  const body={tankId,calculatedLitres,notes:notes||undefined};
+  if(dipMm) body.dipMm=dipMm;
+  // Use original endpoint (supports both mm+litres)
+  const res=await apiFetch('/api/tanks/dip-reading',{method:'POST',body});
+  const data=await res.json();
+  if(!res.ok)return showToast(data.error,'error');
+  const varStr=data.variance!=null?(data.variance>0?` (▲+${Math.abs(data.variance).toFixed(0)}L vs prev)`:` (▼${Math.abs(data.variance).toFixed(0)}L vs prev)`):'';
+  showToast(`✓ Dip reading saved — ${calculatedLitres}L${varStr}`,'success');
+  document.getElementById('drModal')?.remove();
+  renderStock('tanks');
+}
+
+// ── TAB 2: LUBES & PRODUCTS ────────────────────────────────────────────────
+async function _renderLubesTab(){
+  const [prodsRes,statsRes,salesRes]=await Promise.all([apiFetch('/api/products'),apiFetch('/api/products/stats'),apiFetch('/api/products/sales')]);
+  const products=(await prodsRes.json()).data||[];
+  const stats=(await statsRes.json()).data||{};
+  const salesData=await salesRes.json();
+  const sales=salesData.data||[], summary=salesData.summary||{txns:0,revenue:0};
+  const cats=[...new Set(products.map(p=>p.category))].sort();
+  const tc=document.getElementById('stockTabContent');
+
+  const catIcons={lubricant:'🛢️',engine_oil:'🔧',coolant:'💧',grease:'⚙️',accessories:'🔩',other:'📦'};
+  const catLabel=c=>c.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase());
+
+  // Low stock alert
+  const lowStockAlert=stats.lowStock?.length?`
+    <div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 14px;margin-bottom:12px">
+      <div style="font-size:12px;font-weight:700;color:#fca5a5;margin-bottom:6px">⚠ Low Stock Alert (${stats.lowStock.length} item${stats.lowStock.length>1?'s':''})</div>
+      ${stats.lowStock.map(p=>`<div style="font-size:11px;color:var(--text2);margin-bottom:2px">• ${p.product_name} — ${p.stock_qty} ${p.unit} remaining (min: ${p.min_stock})</div>`).join('')}
+    </div>`:'';
+
+  tc.innerHTML=`
+    <!-- Summary Strip -->
+    <div class="summary-strip" style="margin-top:8px">
+      <div class="sum-box"><div class="sum-val">${stats.products?.active||0}</div><div class="sum-lbl">Products</div></div>
+      <div class="sum-box"><div class="sum-val">${stats.todaySales?.txns||0}</div><div class="sum-lbl">Today's Sales</div></div>
+      <div class="sum-box"><div class="sum-val">₹${fmt(stats.todaySales?.revenue||0)}</div><div class="sum-lbl">Today's Revenue</div></div>
+      <div class="sum-box"><div class="sum-val" style="color:var(--red)">${stats.lowStock?.length||0}</div><div class="sum-lbl">Low Stock</div></div>
     </div>
-    <div class="section-title" style="margin-top:8px">Recent Purchases</div>
-    ${(data.recentPurchases||[]).map(p=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${p.tank_name}</div><div class="list-item-sub">${p.quantity}L · ${p.supplier_name||'—'} · ${p.purchase_date}</div></div><div style="font-weight:700">₹${fmt(p.total_amount)}</div></div>`).join('')||'<div class="empty">No purchases yet</div>'}`;
+
+    ${lowStockAlert}
+
+    <!-- Action Buttons -->
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn btn-primary" style="font-size:12px;padding:9px 16px" onclick="showAddProductModal()">+ Add Product</button>
+      <button class="btn" style="font-size:12px;padding:9px 16px;background:var(--surface2);border:1px solid var(--border2);color:var(--text)" onclick="showLubeSaleModal(${JSON.stringify(products).replace(/"/g,'&quot;')})">💰 Record Sale</button>
+    </div>
+
+    <!-- Products by Category -->
+    ${cats.length===0?`<div class="empty" style="margin-top:40px">No products yet.<br>Add your first product to track lubes & accessories.</div>`:
+      cats.map(cat=>{
+        const catProds=products.filter(p=>p.category===cat&&p.is_active);
+        if(!catProds.length)return'';
+        return`<div class="section-title" style="margin-top:12px">${catIcons[cat]||'📦'} ${catLabel(cat)}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:4px">
+          ${catProds.map(p=>{
+            const stockPct=p.min_stock>0?Math.min(100,Math.round((p.stock_qty/Math.max(p.stock_qty,p.min_stock*3))*100)):100;
+            const stockColor=p.stock_qty<=p.min_stock?'var(--red)':p.stock_qty<=p.min_stock*2?'var(--yellow)':'var(--green)';
+            const expiryWarn=p.expiry_date&&new Date(p.expiry_date)<new Date(Date.now()+30*86400000)?`<div style="font-size:10px;color:var(--yellow);margin-top:3px">⚠ Expires: ${p.expiry_date}</div>`:'';
+            return`<div class="card" style="padding:14px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div>
+                  <div style="font-weight:700;font-size:14px">${p.product_name}</div>
+                  <div style="font-size:11px;color:var(--text2);margin-top:2px">${p.product_code||''} ${p.hsn_code?'· HSN: '+p.hsn_code:''}</div>
+                  ${expiryWarn}
+                </div>
+                <div style="text-align:right">
+                  <div style="font-size:16px;font-weight:800;color:var(--accent)">₹${fmt(p.sale_price)}</div>
+                  <div style="font-size:10px;color:var(--text2)">MRP ₹${fmt(p.mrp)} · GST ${p.gst_rate}%</div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                <div style="flex:1">
+                  <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:4px">
+                    <span>Stock: <strong style="color:${stockColor}">${p.stock_qty} ${p.unit}</strong></span>
+                    <span>Min: ${p.min_stock}</span>
+                  </div>
+                  <div class="progress-track" style="height:5px"><div style="height:100%;width:${stockPct}%;background:${stockColor};border-radius:3px;transition:width .3s"></div></div>
+                </div>
+                <div style="font-size:11px;color:var(--text2);white-space:nowrap">${p.sold_30d||0} sold/30d</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button onclick="showStockInModal(${p.id},'${p.product_name.replace(/'/g,'\\'')}','${p.unit}')" style="flex:1;background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.25);padding:6px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700">+ Stock In</button>
+                <button onclick="showLubeSaleModal(${JSON.stringify(products).replace(/"/g,'&quot;')},${p.id})" style="flex:1;background:var(--accent);color:#000;border:none;padding:6px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700">💰 Sell</button>
+                <button onclick="showEditProductModal(${p.id})" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text2);padding:6px 10px;border-radius:6px;cursor:pointer;font-size:11px">✏</button>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`;
+      }).join('')
+    }
+
+    <!-- Today's Product Sales -->
+    ${sales.length?`
+    <div class="section-title" style="margin-top:16px">Today's Product Sales</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="overflow-x:auto">
+      <table class="data-table">
+        <thead><tr><th>Product</th><th>Qty</th><th>Mode</th><th>Amount</th><th>Time</th></tr></thead>
+        <tbody>
+          ${sales.map(s=>`<tr>
+            <td><strong>${s.product_name}</strong><br><span style="font-size:10px;color:var(--text2)">${s.customer_name||''} ${s.vehicle_no||''}</span></td>
+            <td>${s.quantity} ${s.unit}</td>
+            <td>${payIcon(s.payment_mode)} ${s.payment_mode}</td>
+            <td style="font-weight:700">₹${fmt(s.total_amount)}</td>
+            <td style="font-size:11px;color:var(--text2)">${new Date(s.sale_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</td>
+          </tr>`).join('')}
+          <tr class="total-row"><td>TOTAL</td><td></td><td></td><td>₹${fmt(summary.revenue)}</td><td>${summary.txns} sales</td></tr>
+        </tbody>
+      </table></div>
+    </div>`:''}`;
+}
+
+// ── ADD PRODUCT MODAL ──────────────────────────────────────────────────────
+function showAddProductModal(editData){
+  const isEdit=!!editData;
+  const overlay=document.createElement('div');
+  overlay.id='prodModal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:460px;max-height:90vh;overflow-y:auto">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:800;font-size:16px">${isEdit?'✏ Edit Product':'+ Add Product'}</div>
+        <button onclick="document.getElementById('prodModal').remove()" style="background:var(--surface2);border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+        <div class="form-group" style="margin:0"><label>Product Name *</label><input id="pm_name" value="${isEdit?editData.product_name:''}" placeholder="e.g. Servo 4T Engine Oil 900ml"/></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0"><label>Product Code</label><input id="pm_code" value="${isEdit?editData.product_code||'':''}" placeholder="e.g. EO-900"/></div>
+          <div class="form-group" style="margin:0"><label>Category</label>
+            <select id="pm_cat">
+              ${['lubricant','engine_oil','coolant','grease','accessories','other'].map(c=>`<option value="${c}" ${(isEdit?editData.category:'')==c?'selected':''}>${catLabel(c)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0"><label>Unit</label>
+            <select id="pm_unit">
+              ${['litre','500ml','1L','4L','pcs','kg','bottle'].map(u=>`<option value="${u}" ${(isEdit?editData.unit:'litre')==u?'selected':''}>${u}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0"><label>HSN Code</label><input id="pm_hsn" value="${isEdit?editData.hsn_code||'':''}" placeholder="e.g. 27101940"/></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0"><label>MRP (₹)</label><input type="number" id="pm_mrp" value="${isEdit?editData.mrp:''}" placeholder="0"/></div>
+          <div class="form-group" style="margin:0"><label>Sale Price (₹)</label><input type="number" id="pm_price" value="${isEdit?editData.sale_price:''}" placeholder="0"/></div>
+          <div class="form-group" style="margin:0"><label>GST %</label>
+            <select id="pm_gst">
+              ${[0,5,12,18,28].map(g=>`<option value="${g}" ${(isEdit?editData.gst_rate:18)==g?'selected':''}>${g}%</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0"><label>Opening Stock</label><input type="number" id="pm_stock" value="${isEdit?editData.stock_qty:0}" placeholder="0"/></div>
+          <div class="form-group" style="margin:0"><label>Min Stock Alert</label><input type="number" id="pm_min" value="${isEdit?editData.min_stock:5}" placeholder="5"/></div>
+        </div>
+        <div class="form-group" style="margin:0"><label>Expiry Date (optional)</label><input type="date" id="pm_expiry" value="${isEdit?editData.expiry_date||'':''}"/></div>
+      </div>
+      <div style="padding:0 20px 20px;display:flex;gap:10px">
+        <button onclick="saveProduct(${isEdit?`'${editData.id}'`:'null'})" style="flex:1;background:var(--accent);color:#000;border:none;padding:11px;border-radius:8px;font-weight:800;cursor:pointer;font-size:14px">${isEdit?'Update Product':'Add Product'}</button>
+        <button onclick="document.getElementById('prodModal').remove()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text2);padding:11px 20px;border-radius:8px;cursor:pointer">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  function catLabel(c){return c.replace(/_/g,' ').replace(/\b\w/g,l=>l.toUpperCase());}
+}
+async function showEditProductModal(productId){
+  const res=await apiFetch('/api/products');
+  const data=(await res.json()).data||[];
+  const prod=data.find(p=>p.id===productId);
+  if(!prod)return showToast('Product not found','error');
+  showAddProductModal(prod);
+}
+async function saveProduct(productId){
+  const body={
+    productName:document.getElementById('pm_name').value,
+    productCode:document.getElementById('pm_code').value,
+    category:document.getElementById('pm_cat').value,
+    unit:document.getElementById('pm_unit').value,
+    hsnCode:document.getElementById('pm_hsn').value,
+    mrp:document.getElementById('pm_mrp').value,
+    salePrice:document.getElementById('pm_price').value,
+    gstRate:document.getElementById('pm_gst').value,
+    stockQty:document.getElementById('pm_stock').value,
+    minStock:document.getElementById('pm_min').value,
+    expiryDate:document.getElementById('pm_expiry').value||undefined,
+  };
+  if(!body.productName)return showToast('Product name required','error');
+  const url=productId?`/api/products/${productId}`:'/api/products';
+  const method=productId?'PUT':'POST';
+  const res=await apiFetch(url,{method,body});
+  const data=await res.json();
+  if(!res.ok)return showToast(data.error,'error');
+  showToast(`✓ Product ${productId?'updated':'added'}`,'success');
+  document.getElementById('prodModal')?.remove();
+  renderStock('lubes');
+}
+
+// ── STOCK-IN MODAL ─────────────────────────────────────────────────────────
+function showStockInModal(productId, productName, unit){
+  const overlay=document.createElement('div');
+  overlay.id='siModal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:400px">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:800;font-size:16px">+ Stock In — ${productName}</div>
+        <button onclick="document.getElementById('siModal').remove()" style="background:var(--surface2);border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+        <div class="form-group" style="margin:0"><label>Quantity (${unit})</label><input type="number" id="si_qty" placeholder="e.g. 20" min="0.1" step="0.1"/></div>
+        <div class="form-group" style="margin:0"><label>Purchase Rate (₹)</label><input type="number" id="si_rate" placeholder="e.g. 280"/></div>
+        <div class="form-group" style="margin:0"><label>Supplier Name</label><input type="text" id="si_sup" placeholder="e.g. Indian Oil"/></div>
+        <div class="form-group" style="margin:0"><label>Invoice No</label><input type="text" id="si_inv" placeholder="e.g. INV-001"/></div>
+        <div class="form-group" style="margin:0"><label>Notes</label><input type="text" id="si_notes" placeholder="optional"/></div>
+      </div>
+      <div style="padding:0 20px 20px;display:flex;gap:10px">
+        <button onclick="submitStockIn(${productId})" style="flex:1;background:var(--green);color:#000;border:none;padding:11px;border-radius:8px;font-weight:800;cursor:pointer;font-size:14px">+ Add Stock</button>
+        <button onclick="document.getElementById('siModal').remove()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text2);padding:11px 20px;border-radius:8px;cursor:pointer">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+async function submitStockIn(productId){
+  const qty=parseFloat(document.getElementById('si_qty').value);
+  const rate=parseFloat(document.getElementById('si_rate').value)||0;
+  const supplierName=document.getElementById('si_sup').value;
+  const invoiceNo=document.getElementById('si_inv').value;
+  const notes=document.getElementById('si_notes').value;
+  if(!qty||qty<=0)return showToast('Enter quantity','error');
+  const res=await apiFetch(`/api/products/${productId}/stock-in`,{method:'POST',body:{quantity:qty,rate,supplierName:supplierName||undefined,invoiceNo:invoiceNo||undefined,notes:notes||undefined}});
+  const data=await res.json();
+  if(!res.ok)return showToast(data.error,'error');
+  showToast(`✓ ${qty} units added. New stock: ${data.newStock}`,'success');
+  document.getElementById('siModal')?.remove();
+  renderStock('lubes');
+}
+
+// ── LUBE SALE MODAL ────────────────────────────────────────────────────────
+function showLubeSaleModal(products, preselectedId){
+  if(typeof products==='string')try{products=JSON.parse(products);}catch(e){products=[];}
+  const activeProds=products.filter(p=>p.is_active&&p.stock_qty>0);
+  if(!activeProds.length)return showToast('No products in stock to sell','error');
+  const overlay=document.createElement('div');
+  overlay.id='lsModal';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--border2);border-radius:14px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:800;font-size:16px">💰 Lube Sale</div>
+        <button onclick="document.getElementById('lsModal').remove()" style="background:var(--surface2);border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:12px">
+        <div class="form-group" style="margin:0">
+          <label>Product *</label>
+          <select id="ls_prod" onchange="lsUpdatePrice(${JSON.stringify(activeProds).replace(/"/g,'&quot;')})">
+            ${activeProds.map(p=>`<option value="${p.id}" data-price="${p.sale_price}" data-mrp="${p.mrp}" data-unit="${p.unit}" data-stock="${p.stock_qty}" data-gst="${p.gst_rate}" ${p.id==preselectedId?'selected':''}>${p.product_name} (${p.stock_qty} ${p.unit} in stock)</option>`).join('')}
+          </select>
+        </div>
+        <div id="ls_stock_info" style="font-size:11px;color:var(--text2)"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0"><label>Quantity</label><input type="number" id="ls_qty" value="1" min="0.1" step="0.1" oninput="lsCalcTotal()"/></div>
+          <div class="form-group" style="margin:0"><label>Rate (₹)</label><input type="number" id="ls_rate" oninput="lsCalcTotal()"/></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0"><label>Discount (₹)</label><input type="number" id="ls_disc" value="0" min="0" oninput="lsCalcTotal()"/></div>
+          <div class="form-group" style="margin:0"><label>Payment Mode</label>
+            <select id="ls_pay">
+              <option value="cash">💵 Cash</option>
+              <option value="upi">📱 UPI</option>
+              <option value="card">💳 Card</option>
+              <option value="credit">🏢 Credit</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0"><label>Customer Name</label><input type="text" id="ls_cust" placeholder="optional"/></div>
+          <div class="form-group" style="margin:0"><label>Vehicle No</label><input type="text" id="ls_veh" placeholder="optional"/></div>
+        </div>
+        <!-- Total Preview -->
+        <div id="ls_total_preview" style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:12px;display:none">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px">
+            <span>Base Amount</span><span id="ls_base">₹0</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px">
+            <span>GST</span><span id="ls_gst_amt">₹0</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:800;color:var(--accent)">
+            <span>TOTAL</span><span id="ls_total">₹0</span>
+          </div>
+        </div>
+      </div>
+      <div style="padding:0 20px 20px;display:flex;gap:10px">
+        <button onclick="submitLubeSale()" style="flex:1;background:var(--accent);color:#000;border:none;padding:11px;border-radius:8px;font-weight:800;cursor:pointer;font-size:14px">Record Sale</button>
+        <button onclick="document.getElementById('lsModal').remove()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text2);padding:11px 20px;border-radius:8px;cursor:pointer">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  lsUpdatePrice(activeProds);
+}
+function lsUpdatePrice(prods){
+  if(typeof prods==='string')try{prods=JSON.parse(prods);}catch(e){prods=[];}
+  const sel=document.getElementById('ls_prod');
+  if(!sel)return;
+  const opt=sel.options[sel.selectedIndex];
+  if(!opt)return;
+  document.getElementById('ls_rate').value=opt.dataset.price;
+  document.getElementById('ls_stock_info').textContent=`Stock: ${opt.dataset.stock} ${opt.dataset.unit} · MRP ₹${opt.dataset.mrp} · GST ${opt.dataset.gst}%`;
+  lsCalcTotal();
+}
+function lsCalcTotal(){
+  const qty=parseFloat(document.getElementById('ls_qty')?.value)||0;
+  const rate=parseFloat(document.getElementById('ls_rate')?.value)||0;
+  const disc=parseFloat(document.getElementById('ls_disc')?.value)||0;
+  const sel=document.getElementById('ls_prod');
+  if(!sel)return;
+  const gstRate=parseFloat(sel.options[sel.selectedIndex]?.dataset.gst||18);
+  const base=Math.max(0,qty*rate-disc);
+  const gst=Math.round(base*gstRate/100*100)/100;
+  const total=base+gst;
+  document.getElementById('ls_base').textContent=`₹${fmt(base)}`;
+  document.getElementById('ls_gst_amt').textContent=`₹${fmt(gst)}`;
+  document.getElementById('ls_total').textContent=`₹${fmt(total)}`;
+  document.getElementById('ls_total_preview').style.display=base>0?'block':'none';
+}
+async function submitLubeSale(){
+  const productId=document.getElementById('ls_prod').value;
+  const qty=parseFloat(document.getElementById('ls_qty').value);
+  const rate=parseFloat(document.getElementById('ls_rate').value);
+  const discount=parseFloat(document.getElementById('ls_disc').value)||0;
+  const paymentMode=document.getElementById('ls_pay').value;
+  const customerName=document.getElementById('ls_cust').value;
+  const vehicleNo=document.getElementById('ls_veh').value;
+  if(!qty||!rate)return showToast('Enter quantity and rate','error');
+  const res=await apiFetch('/api/products/sale',{method:'POST',body:{productId,quantity:qty,rate,discount,paymentMode,customerName:customerName||undefined,vehicleNo:vehicleNo||undefined,shiftId:shiftId||undefined}});
+  const data=await res.json();
+  if(!res.ok)return showToast(data.error,'error');
+  showToast(`✓ Sale recorded — ${data.invoiceNo} · ₹${fmt(data.totalAmount)}`,'success');
+  document.getElementById('lsModal')?.remove();
+  renderStock('lubes');
+}
+
+// ── TAB 3: PURCHASES ────────────────────────────────────────────────────────
+async function _renderPurchasesTab(today){
+  const [stockRes,suppRes]=await Promise.all([apiFetch('/api/reports/stock'),apiFetch('/api/purchases/suppliers')]);
+  const {data}=await stockRes.json(); const suppliers=(await suppRes.json()).data||[];
+  const tc=document.getElementById('stockTabContent');
+  tc.innerHTML=`
+    <div class="section-title" style="margin-top:8px">Add Fuel Purchase</div>
+    <div class="card">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="margin:0"><label>Tank</label><select id="pTank">${(data.tanks||[]).map(t=>`<option value="${t.id}">${t.tank_name} (${t.fuel_type})</option>`).join('')}</select></div>
+        <div class="form-group" style="margin:0"><label>Supplier</label><select id="pSupp"><option value="">None</option>${suppliers.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="margin:0"><label>Quantity (Litres)</label><input type="number" id="pQty" placeholder="e.g. 10000"/></div>
+        <div class="form-group" style="margin:0"><label>Rate / Litre (₹)</label><input type="number" id="pRate" placeholder="e.g. 65.50"/></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="margin:0"><label>Invoice No</label><input type="text" id="pInv" placeholder="optional"/></div>
+        <div class="form-group" style="margin:0"><label>Density (g/ml)</label><input type="number" id="pDensity" placeholder="e.g. 0.730" step="0.001"/></div>
+      </div>
+      <div id="pAmtPreview" style="display:none;background:var(--surface2);border-radius:7px;padding:10px 14px;margin-bottom:10px;font-size:13px">
+        Total Purchase Value: <strong id="pAmtVal" style="color:var(--accent)">—</strong>
+      </div>
+      <button class="btn btn-primary" onclick="addPurchase()" style="width:100%">🚛 Record Purchase</button>
+    </div>
+
+    <div class="section-title" style="margin-top:12px">Recent Purchases</div>
+    ${(data.recentPurchases||[]).map(p=>`
+      <div class="list-item">
+        <div class="list-item-left">
+          <div class="list-item-title">${p.tank_name} <span class="badge badge-${(p.fuel_type||'').toLowerCase()}">${p.fuel_type}</span></div>
+          <div class="list-item-sub">${p.quantity?.toLocaleString('en-IN')}L · ₹${fmt(p.rate)}/L · ${p.supplier_name||'Direct'} · ${p.purchase_date}${p.density?` · ρ${p.density}`:''}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700">₹${fmt(p.total_amount)}</div>
+          ${p.invoice_no?`<div style="font-size:10px;color:var(--text2)">${p.invoice_no}</div>`:''}
+        </div>
+      </div>`).join('')||'<div class="empty">No purchases yet</div>'}`;
+
+  // Live amount preview
+  ['pQty','pRate'].forEach(id=>{
+    document.getElementById(id)?.addEventListener('input',()=>{
+      const q=parseFloat(document.getElementById('pQty').value)||0;
+      const r=parseFloat(document.getElementById('pRate').value)||0;
+      const amt=q*r;
+      document.getElementById('pAmtVal').textContent=`₹${fmt(amt)} for ${q.toLocaleString('en-IN')}L`;
+      document.getElementById('pAmtPreview').style.display=amt>0?'block':'none';
+    });
+  });
 }
 async function addPurchase(){
-  const tankId=document.getElementById('pTank').value, supplierId=document.getElementById('pSupp').value;
+  const tankId=document.getElementById('pTank').value, supplierId=document.getElementById('pSupp')?.value;
   const quantity=parseFloat(document.getElementById('pQty').value), rate=parseFloat(document.getElementById('pRate').value);
-  const invoiceNo=document.getElementById('pInv').value;
+  const invoiceNo=document.getElementById('pInv')?.value;
+  const density=parseFloat(document.getElementById('pDensity')?.value)||undefined;
   if(!quantity||!rate)return showToast('Enter quantity and rate','error');
-  const res=await apiFetch('/api/purchases',{method:'POST',body:{tankId,supplierId:supplierId||undefined,quantity,rate,invoiceNo:invoiceNo||undefined}});
+  const res=await apiFetch('/api/purchases',{method:'POST',body:{tankId,supplierId:supplierId||undefined,quantity,rate,invoiceNo:invoiceNo||undefined,density}});
   const data=await res.json(); if(!res.ok)return showToast(data.error,'error');
-  showToast('✓ Purchase recorded','success'); renderStock();
+  showToast(`✓ Purchase recorded — ${quantity.toLocaleString('en-IN')}L added to tank`,'success');
+  renderStock('purchases');
 }
 
 // ── MORE ──────────────────────────────────────────────────────────────────

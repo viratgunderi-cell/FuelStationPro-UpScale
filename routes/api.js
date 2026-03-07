@@ -292,3 +292,243 @@ router.get('/reports/trend', async (req, res) => {
   ]);
   res.json({ success: true, data: { daily, fuelSplit, paymentSplit } });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 5 — DIP CHART & PRODUCTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── DIP CHART: GET calibration data for a tank ───────────────────────────
+router.get('/tanks/:id/dip-chart', async (req, res) => {
+  const sid = req.user.stationId;
+  const tank = await db.get('SELECT * FROM tanks WHERE id=? AND station_id=?', [req.params.id, sid]);
+  if (!tank) return res.status(404).json({ success: false, error: 'Tank not found.' });
+  const rows = await db.all('SELECT mm_level, litres_volume FROM dip_chart_data WHERE tank_id=? ORDER BY mm_level ASC', [req.params.id]);
+  res.json({ success: true, data: { tank, rows } });
+});
+
+// ── DIP CHART: SAVE/REPLACE calibration rows for a tank ──────────────────
+router.post('/tanks/:id/dip-chart', authorize('owner', 'manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const tank = await db.get('SELECT * FROM tanks WHERE id=? AND station_id=?', [req.params.id, sid]);
+  if (!tank) return res.status(404).json({ success: false, error: 'Tank not found.' });
+  const { rows } = req.body; // [{mm, litres}, ...]
+  if (!Array.isArray(rows) || rows.length < 2) return res.status(400).json({ success: false, error: 'Provide at least 2 calibration points.' });
+  await db.transaction(async t => {
+    await t.run('DELETE FROM dip_chart_data WHERE tank_id=?', [req.params.id]);
+    for (const r of rows) {
+      const mm = parseFloat(r.mm), litres = parseFloat(r.litres);
+      if (isNaN(mm) || isNaN(litres) || mm < 0 || litres < 0) continue;
+      await t.run('INSERT OR REPLACE INTO dip_chart_data (station_id,tank_id,mm_level,litres_volume) VALUES (?,?,?,?)', [sid, req.params.id, mm, litres]);
+    }
+  });
+  const saved = await db.all('SELECT mm_level, litres_volume FROM dip_chart_data WHERE tank_id=? ORDER BY mm_level ASC', [req.params.id]);
+  await db.logAudit(sid, req.user.id, req.user.username, 'update', 'dip_chart', tank.id, null, { points: saved.length }, req.ip, req.headers['user-agent']);
+  res.json({ success: true, data: saved, message: `Dip chart saved (${saved.length} points).` });
+});
+
+// ── DIP CHART: Convert mm → litres via linear interpolation ───────────────
+router.post('/tanks/mm-to-litres', async (req, res) => {
+  const sid = req.user.stationId;
+  const { tankId, mm } = req.body;
+  if (!tankId || mm == null) return res.status(400).json({ success: false, error: 'tankId and mm required.' });
+  const rows = await db.all('SELECT mm_level, litres_volume FROM dip_chart_data WHERE tank_id=? AND station_id=? ORDER BY mm_level ASC', [tankId, sid]);
+  if (rows.length < 2) return res.status(404).json({ success: false, error: 'No dip chart configured for this tank.' });
+  const dipMm = parseFloat(mm);
+  // Clamp to chart range
+  if (dipMm <= rows[0].mm_level) return res.json({ success: true, litres: rows[0].litres_volume, interpolated: false });
+  if (dipMm >= rows[rows.length-1].mm_level) return res.json({ success: true, litres: rows[rows.length-1].litres_volume, interpolated: false });
+  // Binary search for bracket
+  let lo = 0, hi = rows.length - 1;
+  while (hi - lo > 1) { const mid = Math.floor((lo+hi)/2); if (rows[mid].mm_level <= dipMm) lo = mid; else hi = mid; }
+  const r0 = rows[lo], r1 = rows[hi];
+  const t = (dipMm - r0.mm_level) / (r1.mm_level - r0.mm_level);
+  const litres = Math.round((r0.litres_volume + t * (r1.litres_volume - r0.litres_volume)) * 10) / 10;
+  res.json({ success: true, litres, interpolated: true, mm: dipMm, lo: r0, hi: r1 });
+});
+
+// ── DIP CHART: GET recent dip readings for a tank ─────────────────────────
+router.get('/tanks/:id/dip-readings', async (req, res) => {
+  const sid = req.user.stationId;
+  const tank = await db.get('SELECT id,tank_name FROM tanks WHERE id=? AND station_id=?', [req.params.id, sid]);
+  if (!tank) return res.status(404).json({ success: false, error: 'Tank not found.' });
+  const rows = await db.all(`SELECT dr.*,u.full_name as taken_by_name FROM dip_readings dr LEFT JOIN users u ON u.id=dr.taken_by WHERE dr.tank_id=? AND dr.station_id=? ORDER BY dr.reading_time DESC LIMIT 30`, [req.params.id, sid]);
+  res.json({ success: true, data: rows });
+});
+
+// ── DIP CHART: Submit a dip reading (mm → auto-convert if chart exists) ────
+// Override the old endpoint with enhanced version
+router.post('/tanks/dip-reading-v2', authorize('owner', 'manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const { tankId, dipMm, calculatedLitres, notes } = req.body;
+  const tank = await db.get('SELECT * FROM tanks WHERE id=? AND station_id=?', [tankId, sid]);
+  if (!tank) return res.status(404).json({ success: false, error: 'Tank not found.' });
+  let litres = calculatedLitres != null ? parseFloat(calculatedLitres) : null;
+  let autoConverted = false;
+  // If mm given but no litres, try dip chart interpolation
+  if (dipMm != null && litres == null) {
+    const rows = await db.all('SELECT mm_level, litres_volume FROM dip_chart_data WHERE tank_id=? ORDER BY mm_level ASC', [tankId]);
+    if (rows.length >= 2) {
+      const dm = parseFloat(dipMm);
+      if (dm <= rows[0].mm_level) { litres = rows[0].litres_volume; }
+      else if (dm >= rows[rows.length-1].mm_level) { litres = rows[rows.length-1].litres_volume; }
+      else {
+        let lo = 0, hi = rows.length - 1;
+        while (hi - lo > 1) { const mid = Math.floor((lo+hi)/2); if (rows[mid].mm_level <= dm) lo = mid; else hi = mid; }
+        const r0 = rows[lo], r1 = rows[hi];
+        const t2 = (dm - r0.mm_level) / (r1.mm_level - r0.mm_level);
+        litres = Math.round((r0.litres_volume + t2 * (r1.litres_volume - r0.litres_volume)) * 10) / 10;
+      }
+      autoConverted = true;
+    }
+  }
+  if (litres == null || isNaN(litres)) return res.status(400).json({ success: false, error: 'Provide dipMm (with dip chart) or calculatedLitres directly.' });
+  const variance = litres - tank.current_stock;
+  await db.run(`INSERT INTO dip_readings (station_id,tank_id,dip_mm,calculated_litres,actual_stock,variance,taken_by,notes) VALUES (?,?,?,?,?,?,?,?)`,
+    [sid, tankId, dipMm||null, litres, litres, variance, req.user.id, notes||null]);
+  await db.run(`UPDATE tanks SET current_stock=?,updated_at=datetime('now') WHERE id=?`, [litres, tankId]);
+  res.json({ success: true, litres, variance, autoConverted, message: `Dip reading saved. Stock updated to ${litres}L.` });
+});
+
+// ── PRODUCTS: List all products ───────────────────────────────────────────
+router.get('/products', async (req, res) => {
+  const sid = req.user.stationId;
+  const data = await db.all(`SELECT p.*,
+    COALESCE((SELECT SUM(quantity) FROM product_sales WHERE product_id=p.id AND station_id=p.station_id AND is_cancelled=0 AND date(sale_time)>=date('now','-30 days')),0) as sold_30d
+    FROM products p WHERE p.station_id=? ORDER BY p.category,p.product_name`, [sid]);
+  res.json({ success: true, data });
+});
+
+// ── PRODUCTS: Add product ─────────────────────────────────────────────────
+router.post('/products', authorize('owner', 'manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const { productName, productCode, category, hsnCode, unit, mrp, salePrice, gstRate, stockQty, minStock, expiryDate } = req.body;
+  if (!productName) return res.status(400).json({ success: false, error: 'Product name required.' });
+  const r = await db.run(`INSERT INTO products (station_id,product_name,product_code,category,hsn_code,unit,mrp,sale_price,gst_rate,stock_qty,min_stock,expiry_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [sid, productName, productCode||null, category||'lubricant', hsnCode||null, unit||'litre', parseFloat(mrp||0), parseFloat(salePrice||0), parseFloat(gstRate||18), parseFloat(stockQty||0), parseFloat(minStock||5), expiryDate||null]);
+  await db.logAudit(sid, req.user.id, req.user.username, 'create', 'product', r.lastInsertRowid, null, req.body, req.ip, req.headers['user-agent']);
+  res.json({ success: true, productId: r.lastInsertRowid, message: 'Product added.' });
+});
+
+// ── PRODUCTS: Update product ──────────────────────────────────────────────
+router.put('/products/:id', authorize('owner', 'manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const prod = await db.get('SELECT * FROM products WHERE id=? AND station_id=?', [req.params.id, sid]);
+  if (!prod) return res.status(404).json({ success: false, error: 'Product not found.' });
+  const { productName, productCode, category, hsnCode, unit, mrp, salePrice, gstRate, minStock, expiryDate } = req.body;
+  const n = v => (v !== undefined && v !== '' ? v : null);
+  const nf = v => (v != null && v !== '' ? parseFloat(v) : null);
+  await db.run(`UPDATE products SET
+    product_name=COALESCE(?,product_name),
+    product_code=COALESCE(?,product_code),
+    category=COALESCE(?,category),
+    hsn_code=COALESCE(?,hsn_code),
+    unit=COALESCE(?,unit),
+    mrp=COALESCE(?,mrp),
+    sale_price=COALESCE(?,sale_price),
+    gst_rate=COALESCE(?,gst_rate),
+    min_stock=COALESCE(?,min_stock),
+    expiry_date=COALESCE(?,expiry_date)
+    WHERE id=? AND station_id=?`,
+    [n(productName), n(productCode), n(category), n(hsnCode), n(unit), nf(mrp), nf(salePrice), nf(gstRate), nf(minStock), n(expiryDate), req.params.id, sid]);
+  res.json({ success: true, message: 'Product updated.' });
+});
+
+// ── PRODUCTS: Toggle active/inactive ─────────────────────────────────────
+router.delete('/products/:id', authorize('owner'), async (req, res) => {
+  const sid = req.user.stationId;
+  await db.run('UPDATE products SET is_active=0 WHERE id=? AND station_id=?', [req.params.id, sid]);
+  res.json({ success: true, message: 'Product deactivated.' });
+});
+
+// ── PRODUCTS: Stock-In ────────────────────────────────────────────────────
+router.post('/products/:id/stock-in', authorize('owner', 'manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const prod = await db.get('SELECT * FROM products WHERE id=? AND station_id=?', [req.params.id, sid]);
+  if (!prod) return res.status(404).json({ success: false, error: 'Product not found.' });
+  const { quantity, rate, invoiceNo, supplierName, notes } = req.body;
+  const qty = parseFloat(quantity);
+  if (!qty || qty <= 0) return res.status(400).json({ success: false, error: 'Quantity must be > 0.' });
+  await db.transaction(async t => {
+    await t.run(`INSERT INTO product_stock_in (station_id,product_id,quantity,rate,invoice_no,supplier_name,notes,received_by) VALUES (?,?,?,?,?,?,?,?)`,
+      [sid, req.params.id, qty, parseFloat(rate||0), invoiceNo||null, supplierName||null, notes||null, req.user.id]);
+    await t.run('UPDATE products SET stock_qty=stock_qty+? WHERE id=?', [qty, req.params.id]);
+  });
+  const updated = await db.get('SELECT stock_qty FROM products WHERE id=?', [req.params.id]);
+  res.json({ success: true, newStock: updated.stock_qty, message: `Added ${qty} units. New stock: ${updated.stock_qty}.` });
+});
+
+// ── PRODUCTS: Record a sale ───────────────────────────────────────────────
+router.post('/products/sale', async (req, res) => {
+  const sid = req.user.stationId;
+  const { productId, quantity, rate, paymentMode, customerName, vehicleNo, shiftId, discount } = req.body;
+  const prod = await db.get('SELECT * FROM products WHERE id=? AND station_id=? AND is_active=1', [productId, sid]);
+  if (!prod) return res.status(404).json({ success: false, error: 'Product not found.' });
+  const qty = parseFloat(quantity);
+  if (!qty || qty <= 0) return res.status(400).json({ success: false, error: 'Quantity must be > 0.' });
+  if (prod.stock_qty < qty) return res.status(400).json({ success: false, error: `Insufficient stock. Available: ${prod.stock_qty} ${prod.unit}.` });
+  const saleRate = parseFloat(rate || prod.sale_price);
+  const discAmt = parseFloat(discount || 0);
+  const baseAmount = qty * saleRate - discAmt;
+  const gstAmt = Math.round((baseAmount * prod.gst_rate / 100) * 100) / 100;
+  const totalAmount = Math.round((baseAmount + gstAmt) * 100) / 100;
+  const invoiceNo = db.generateInvoiceNo('PS');
+  const openShift = shiftId ? await db.get('SELECT id FROM shifts WHERE id=? AND station_id=? AND status=?', [shiftId, sid, 'open']) : null;
+  await db.transaction(async t => {
+    await t.run(`INSERT INTO product_sales (station_id,invoice_no,product_id,shift_id,quantity,rate,mrp,discount,gst_rate,gst_amount,total_amount,payment_mode,customer_name,vehicle_no,served_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [sid, invoiceNo, productId, openShift?.id||null, qty, saleRate, prod.mrp, discAmt, prod.gst_rate, gstAmt, totalAmount, paymentMode||'cash', customerName||null, vehicleNo||null, req.user.id]);
+    await t.run('UPDATE products SET stock_qty=stock_qty-? WHERE id=?', [qty, productId]);
+  });
+  res.json({ success: true, invoiceNo, totalAmount, gstAmount: gstAmt, message: `Sale recorded. ₹${totalAmount}` });
+});
+
+// ── PRODUCTS: List recent sales ───────────────────────────────────────────
+router.get('/products/sales', async (req, res) => {
+  const sid = req.user.stationId;
+  const { date, productId } = req.query;
+  const filterDate = date || new Date().toISOString().slice(0,10);
+  let sql = `SELECT ps.*,p.product_name,p.unit,p.category,u.full_name as served_by_name FROM product_sales ps JOIN products p ON p.id=ps.product_id LEFT JOIN users u ON u.id=ps.served_by WHERE ps.station_id=? AND ps.is_cancelled=0`;
+  const params = [sid];
+  if (date) { sql += ' AND date(ps.sale_time)=?'; params.push(date); }
+  if (productId) { sql += ' AND ps.product_id=?'; params.push(productId); }
+  sql += ' ORDER BY ps.sale_time DESC LIMIT 100';
+  const data = await db.all(sql, params);
+  // Summary
+  const summary = await db.get(`SELECT COUNT(*) as txns, ROUND(SUM(total_amount),2) as revenue, ROUND(SUM(quantity),2) as qty FROM product_sales WHERE station_id=? AND is_cancelled=0 AND date(sale_time)=?`, [sid, filterDate]);
+  res.json({ success: true, data, summary: summary || { txns: 0, revenue: 0, qty: 0 } });
+});
+
+// ── PRODUCTS: Stats (for dashboard widget) ────────────────────────────────
+router.get('/products/stats', async (req, res) => {
+  const sid = req.user.stationId;
+  const [products, lowStock, todaySales, recentStockIn] = await Promise.all([
+    db.get('SELECT COUNT(*) as total, SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) as active FROM products WHERE station_id=?', [sid]),
+    db.all(`SELECT id,product_name,stock_qty,min_stock,unit,category FROM products WHERE station_id=? AND is_active=1 AND stock_qty<=min_stock ORDER BY stock_qty ASC LIMIT 5`, [sid]),
+    db.get(`SELECT COUNT(*) as txns,ROUND(SUM(total_amount),2) as revenue FROM product_sales WHERE station_id=? AND date(sale_time)=date('now') AND is_cancelled=0`, [sid]),
+    db.all(`SELECT psi.*,p.product_name FROM product_stock_in psi JOIN products p ON p.id=psi.product_id WHERE psi.station_id=? ORDER BY psi.created_at DESC LIMIT 5`, [sid])
+  ]);
+  res.json({ success: true, data: { products, lowStock, todaySales, recentStockIn } });
+});
+
+// ── PRODUCTS: Cancel a product sale ───────────────────────────────────────
+router.put('/products/sale/:id/cancel', authorize('owner', 'manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const sale = await db.get('SELECT * FROM product_sales WHERE id=? AND station_id=? AND is_cancelled=0', [req.params.id, sid]);
+  if (!sale) return res.status(404).json({ success: false, error: 'Sale not found.' });
+  await db.transaction(async t => {
+    await t.run('UPDATE product_sales SET is_cancelled=1,cancel_reason=? WHERE id=?', [req.body.reason||'Cancelled', req.params.id]);
+    await t.run('UPDATE products SET stock_qty=stock_qty+? WHERE id=?', [sale.quantity, sale.product_id]);
+  });
+  res.json({ success: true, message: 'Sale cancelled and stock restored.' });
+});
+
+// ── DIP CHART: All tanks dip status ──────────────────────────────────────
+router.get('/tanks/dip-status', async (req, res) => {
+  const sid = req.user.stationId;
+  const tanks = await db.all('SELECT * FROM tanks WHERE station_id=? AND is_active=1 ORDER BY fuel_type', [sid]);
+  const result = await Promise.all(tanks.map(async t => {
+    const chartCount = await db.get('SELECT COUNT(*) as cnt FROM dip_chart_data WHERE tank_id=?', [t.id]);
+    const lastReading = await db.get('SELECT * FROM dip_readings WHERE tank_id=? ORDER BY reading_time DESC LIMIT 1', [t.id]);
+    return { ...t, chartPoints: chartCount?.cnt || 0, lastReading };
+  }));
+  res.json({ success: true, data: result });
+});

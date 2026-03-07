@@ -311,6 +311,60 @@ async function initSchema() {
       sent_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_notif_log_station ON notification_log(station_id, sent_at)`,
+
+    // ── SPRINT 5: DIP CHART CALIBRATION DATA ─────────────────────────────
+    `CREATE TABLE IF NOT EXISTS dip_chart_data (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      tank_id INTEGER NOT NULL REFERENCES tanks(id) ON DELETE CASCADE,
+      mm_level REAL NOT NULL,
+      litres_volume REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(tank_id, mm_level)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_dip_chart_tank ON dip_chart_data(tank_id, mm_level)`,
+
+    // ── SPRINT 5: PRODUCT SALES (Lubes & Accessories) ────────────────────
+    `CREATE TABLE IF NOT EXISTS product_sales (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      invoice_no TEXT NOT NULL,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      shift_id INTEGER REFERENCES shifts(id),
+      quantity REAL NOT NULL,
+      rate REAL NOT NULL,
+      mrp REAL NOT NULL DEFAULT 0,
+      discount REAL NOT NULL DEFAULT 0,
+      gst_rate REAL NOT NULL DEFAULT 18,
+      gst_amount REAL NOT NULL DEFAULT 0,
+      total_amount REAL NOT NULL,
+      payment_mode TEXT NOT NULL DEFAULT 'cash',
+      customer_name TEXT,
+      vehicle_no TEXT,
+      served_by INTEGER,
+      is_cancelled INTEGER NOT NULL DEFAULT 0,
+      cancel_reason TEXT,
+      sale_time TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_product_sales_station ON product_sales(station_id, sale_time)`,
+    `CREATE INDEX IF NOT EXISTS idx_product_sales_product ON product_sales(product_id)`,
+
+    // ── SPRINT 5: PRODUCT STOCK-IN ────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS product_stock_in (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      quantity REAL NOT NULL,
+      rate REAL NOT NULL DEFAULT 0,
+      invoice_no TEXT,
+      supplier_name TEXT,
+      notes TEXT,
+      received_by INTEGER,
+      stock_date TEXT NOT NULL DEFAULT (date('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sales_station ON sales(station_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sales_time ON sales(sale_time)`,
