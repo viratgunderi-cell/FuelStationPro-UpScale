@@ -568,6 +568,21 @@ input,select,textarea{font-family:inherit}
             <span class="nav-link-icon">🏦</span> Bank Reconciliation
           </button>
         </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Compliance & Finance</div>
+          <button class="nav-link" id="nav-gst" onclick="navTo('gst')">
+            <span class="nav-link-icon">🧾</span> GST Module
+          </button>
+          <button class="nav-link" id="nav-purchases2" onclick="navTo('purchases2')">
+            <span class="nav-link-icon">🚛</span> Purchases & Suppliers
+          </button>
+          <button class="nav-link" id="nav-reports2" onclick="navTo('reports2')">
+            <span class="nav-link-icon">📈</span> Advanced Reports
+          </button>
+          <button class="nav-link" id="nav-shiftconfig" onclick="navTo('shiftconfig')">
+            <span class="nav-link-icon">⏰</span> Shift Config
+          </button>
+        </div>
       </nav>
 
       <div class="sidebar-foot">
@@ -823,6 +838,10 @@ const pageMeta = {
   vehicles:{title:'Vehicle Report',sub:'Per-vehicle fuel consumption'},
   density:{title:'Density Analysis',sub:'Purchase quality variance'},
   bankrecon:{title:'Bank Reconciliation',sub:'System vs bank statement'},
+  gst:{title:'GST Module',sub:'GSTR-1 · GSTR-3B · E-Invoice · Tally · P&L'},
+  purchases2:{title:'Purchases & Suppliers',sub:'Fuel deliveries, GRN, Supplier ledger'},
+  reports2:{title:'Advanced Reports',sub:'Nozzle-wise · Shift comparison · Margin analysis'},
+  shiftconfig:{title:'Shift Configuration',sub:'Morning / Afternoon / Night shift setup'},
 };
 
 // ── Navigation ────────────────────────────────────────────────────────────
@@ -853,6 +872,10 @@ function navigate(tab){
     vehicles:showVehicleReport,
     density:showDensityReport,
     bankrecon:showBankRecon,
+    gst:showGSTModule,
+    purchases2:showPurchasesPage,
+    reports2:showAdvancedReports,
+    shiftconfig:showShiftConfig,
   }[tab]||renderDashboard)();
 }
 function navTo(tab){navigate(tab);}
@@ -2595,7 +2618,7 @@ async function showPayrollRun(mVal,yVal){
         </div>`:''}
         <div style="display:flex;gap:6px">
           <button onclick="calcAndShowSlip(${e.id},'${e.full_name}',${m},${y})" style="flex:1;padding:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">🧮 Calculate</button>
-          ${pr?`<button onclick="exportSalarySlipPDF(${pr.id})" style="flex:1;padding:8px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">📄 Slip PDF</button>
+          ${pr?`<button onclick="generatePayslipPDF(${pr.id})" style="flex:1;padding:8px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#fca5a5;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">📄 Slip PDF</button>
           ${pr.status!=='paid'?`<button onclick="markPaid(${pr.id},${m},${y})" style="flex:1;padding:8px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:#86efac;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600">✓ Mark Paid</button>`:''}`:''}
         </div>
       </div>`;
@@ -3933,6 +3956,742 @@ function refreshNotifBadge(){
   }).catch(()=>{});
 }
 function showToast(msg,type='success'){const t=document.getElementById('toast');t.textContent=msg;t.className=`toast ${type} show`;setTimeout(()=>t.classList.remove('show'),3000);}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — GST MODULE
+// ═══════════════════════════════════════════════════════════════════════════
+async function showGSTModule(monthVal) {
+  const c = document.getElementById('mainContent');
+  const month = monthVal || new Date().toISOString().slice(0,7);
+  c.innerHTML = `<div class="page-header"><div><div class="page-title">🧾 GST Module</div><div class="page-sub">GSTR-1 · GSTR-3B · E-Invoice · Tally Export · P&L</div></div></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;align-items:center">
+    <input type="month" id="gstMonth" value="${month}" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px" onchange="showGSTModule(this.value)"/>
+    <button onclick="showGSTModule(document.getElementById('gstMonth').value)" class="btn btn-primary" style="padding:8px 18px">Load</button>
+    <a id="gstr1Csv" href="#" onclick="downloadGSTR1CSV(event)" style="background:var(--green);color:#000;font-weight:700;padding:8px 14px;border-radius:8px;text-decoration:none;font-size:12px">⬇ GSTR-1 CSV</a>
+    <a id="tallyXml" href="#" onclick="downloadTallyXML(event)" style="background:var(--accent);color:#000;font-weight:700;padding:8px 14px;border-radius:8px;text-decoration:none;font-size:12px">⬇ Tally XML</a>
+  </div>
+  <div id="gstContent"><div class="spinner"></div></div>`;
+
+  try {
+    const [sumRes, gstr1Res, gstr3bRes, plRes] = await Promise.all([
+      apiFetch(`/api/gst/summary?month=${month}`).then(r=>r.json()),
+      apiFetch(`/api/gst/gstr1?month=${month}`).then(r=>r.json()),
+      apiFetch(`/api/gst/gstr3b?month=${month}`).then(r=>r.json()),
+      apiFetch(`/api/gst/pl?month=${month}`).then(r=>r.json())
+    ]);
+    const s = sumRes.data, g1 = gstr1Res.data, g3 = gstr3bRes.data, pl = plRes.data;
+
+    document.getElementById('gstContent').innerHTML = `
+    <!-- P&L Summary -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:18px">
+      ${[
+        ['Total Revenue','₹'+fmt(pl?.revenue?.total),'var(--accent)'],
+        ['Gross Profit','₹'+fmt(pl?.grossProfit),'var(--green)'],
+        ['Net Profit','₹'+fmt(pl?.netProfit),pl?.netProfit>=0?'var(--green)':'var(--red)'],
+        ['Margin/Litre','₹'+fmt(pl?.metrics?.marginPerLitre),'var(--text)'],
+        ['GST Outward','₹'+fmt(s?.outward?.gst),'var(--yellow)'],
+        ['ITC Available','₹'+fmt(s?.inward?.itc),'var(--green)'],
+        ['Net GST Due','₹'+fmt(s?.netTaxPayable),'var(--red)'],
+      ].map(([lbl,val,col])=>`<div style="background:var(--surface2);border-radius:10px;padding:14px;border:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px">${lbl}</div>
+        <div style="font-size:18px;font-weight:800;color:${col}">${val}</div>
+      </div>`).join('')}
+    </div>
+
+    <!-- GSTR-3B Summary -->
+    <div style="background:var(--surface2);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid var(--border)">
+      <div class="section-title">📊 GSTR-3B Summary — ${month}</div>
+      <table class="data-table"><thead><tr><th>Section</th><th>Description</th><th style="text-align:right">Amount (₹)</th></tr></thead><tbody>
+        <tr><td>3.1(a)</td><td>Outward taxable supplies (Products)</td><td style="text-align:right;font-weight:700">${fmt(g3?.table31?.taxableProductSales)}</td></tr>
+        <tr><td>3.1(c)</td><td>Exempt fuel sales (Petrol/Diesel)</td><td style="text-align:right">${fmt(g3?.table31?.exemptFuelSales)}</td></tr>
+        <tr><td>3.1 Tax</td><td>CGST</td><td style="text-align:right">${fmt(g3?.table31?.cgst)}</td></tr>
+        <tr><td></td><td>SGST</td><td style="text-align:right">${fmt(g3?.table31?.sgst)}</td></tr>
+        <tr style="background:var(--surface3)"><td>4(A)</td><td>ITC Available — CGST</td><td style="text-align:right;color:var(--green)">${fmt(g3?.table4?.cgstItc)}</td></tr>
+        <tr style="background:var(--surface3)"><td></td><td>ITC Available — SGST</td><td style="text-align:right;color:var(--green)">${fmt(g3?.table4?.sgstItc)}</td></tr>
+        <tr style="background:rgba(255,70,70,.1)"><td colspan="2"><strong>Net Tax Payable</strong></td><td style="text-align:right;font-weight:800;color:var(--red)">₹${fmt(g3?.netPayable?.total)}</td></tr>
+      </tbody></table>
+    </div>
+
+    <!-- GSTR-1 B2C Fuel -->
+    <div style="background:var(--surface2);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid var(--border)">
+      <div class="section-title">⛽ GSTR-1 — B2C Fuel Sales (Exempt)</div>
+      <table class="data-table"><thead><tr><th>Fuel Type</th><th>Payment</th><th>Transactions</th><th>Quantity (L)</th><th style="text-align:right">Amount (₹)</th></tr></thead><tbody>
+        ${(g1?.b2c||[]).map(r=>`<tr><td><span class="fuel-name-${r.item?.toLowerCase()}">${r.item}</span></td><td>${payIcon(r.payment_mode)} ${r.payment_mode}</td><td>${r.txns}</td><td>${fmt(r.qty)}</td><td style="text-align:right;font-weight:700">₹${fmt(r.amount)}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text3)">No fuel sales this month</td></tr>'}
+      </tbody></table>
+    </div>
+
+    <!-- B2B Credit Sales -->
+    ${(g1?.b2b||[]).length > 0 ? `<div style="background:var(--surface2);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid var(--border)">
+      <div class="section-title">🏢 GSTR-1 — B2B Credit Sales (GST Customers)</div>
+      <table class="data-table"><thead><tr><th>Invoice</th><th>Date</th><th>Customer</th><th>GSTIN</th><th>Fuel</th><th style="text-align:right">Amount</th><th>Action</th></tr></thead><tbody>
+        ${g1.b2b.map(r=>`<tr><td style="font-size:11px">${r.invoice_no}</td><td>${r.sale_time?.slice(0,10)}</td><td>${r.company_name}</td><td style="font-size:10px;color:var(--text3)">${r.customer_gstin||'—'}</td><td>${r.fuel_type}</td><td style="text-align:right;font-weight:700">₹${fmt(r.total_amount)}</td><td><button onclick="generateIRN('${r.invoice_no}')" style="background:var(--accent);border:none;color:#000;font-size:10px;font-weight:700;padding:4px 8px;border-radius:6px;cursor:pointer">IRN</button></td></tr>`).join('')}
+      </tbody></table>
+    </div>` : ''}
+
+    <!-- HSN Summary -->
+    ${(g1?.hsnSummary||[]).length > 0 ? `<div style="background:var(--surface2);border-radius:12px;padding:16px;margin-bottom:16px;border:1px solid var(--border)">
+      <div class="section-title">📦 HSN-wise Summary (Products)</div>
+      <table class="data-table"><thead><tr><th>HSN Code</th><th>GST Rate</th><th>Transactions</th><th style="text-align:right">Taxable Amount</th><th style="text-align:right">GST Amount</th></tr></thead><tbody>
+        ${g1.hsnSummary.map(r=>`<tr><td>${r.hsn_code}</td><td>${r.gst_rate}%</td><td>${r.txns}</td><td style="text-align:right">₹${fmt(r.amount)}</td><td style="text-align:right;color:var(--yellow)">₹${fmt(r.gst_amount)}</td></tr>`).join('')}
+      </tbody></table>
+    </div>` : ''}
+
+    <!-- P&L Detail -->
+    <div style="background:var(--surface2);border-radius:12px;padding:16px;border:1px solid var(--border)">
+      <div class="section-title">📈 Profit & Loss — ${month}</div>
+      <table class="data-table"><tbody>
+        <tr><td><strong>Revenue — Fuel Sales</strong></td><td style="text-align:right;font-weight:700">₹${fmt(pl?.revenue?.fuel)}</td></tr>
+        <tr><td><strong>Revenue — Product Sales</strong></td><td style="text-align:right;font-weight:700">₹${fmt(pl?.revenue?.products)}</td></tr>
+        <tr style="border-top:2px solid var(--border2)"><td><strong>Total Revenue</strong></td><td style="text-align:right;font-size:16px;font-weight:800;color:var(--accent)">₹${fmt(pl?.revenue?.total)}</td></tr>
+        <tr><td>Less: Fuel Purchase Cost</td><td style="text-align:right;color:var(--red)">-₹${fmt(pl?.cogs?.fuel)}</td></tr>
+        <tr><td>Less: Product Purchase Cost</td><td style="text-align:right;color:var(--red)">-₹${fmt(pl?.cogs?.products)}</td></tr>
+        <tr style="border-top:1px solid var(--border2)"><td><strong>Gross Profit</strong></td><td style="text-align:right;font-weight:800;color:var(--green)">₹${fmt(pl?.grossProfit)}</td></tr>
+        <tr><td>Less: Salary Expenses</td><td style="text-align:right;color:var(--red)">-₹${fmt(pl?.expenses?.salary)}</td></tr>
+        <tr style="border-top:2px solid var(--border2)"><td><strong>Net Profit</strong></td><td style="text-align:right;font-size:18px;font-weight:800;color:${(pl?.netProfit||0)>=0?'var(--green)':'var(--red)'}">₹${fmt(pl?.netProfit)}</td></tr>
+        <tr><td style="color:var(--text3)">Total Litres Sold</td><td style="text-align:right;color:var(--text3)">${fmt(pl?.metrics?.litres)} L</td></tr>
+        <tr><td style="color:var(--text3)">Gross Margin per Litre</td><td style="text-align:right;color:var(--text3)">₹${fmt(pl?.metrics?.marginPerLitre)}</td></tr>
+        <tr><td style="color:var(--text3)">Gross Margin %</td><td style="text-align:right;color:var(--text3)">${fmt(pl?.metrics?.grossMarginPct)}%</td></tr>
+      </tbody></table>
+    </div>`;
+  } catch(e) {
+    document.getElementById('gstContent').innerHTML = `<div class="empty">Error loading GST data: ${e.message}</div>`;
+  }
+}
+
+async function generateIRN(invoiceNo) {
+  try {
+    const r = await apiFetch('/api/gst/irn/generate', { method:'POST', body: JSON.stringify({ invoiceNo }) });
+    const d = await r.json();
+    if (!d.success) return showToast(d.error, 'error');
+    showToast(`IRN generated: ${d.data.irn.slice(0,30)}...`, 'success');
+    alert(`E-Invoice IRN\n\nInvoice: ${invoiceNo}\nBuyer: ${d.data.buyerName}\nGSTIN: ${d.data.buyerGSTIN}\n\nIRN:\n${d.data.irn}\n\n⚠️ ${d.data.note}`);
+  } catch(e) { showToast('IRN generation failed', 'error'); }
+}
+
+async function downloadGSTR1CSV(e) {
+  e.preventDefault();
+  const month = document.getElementById('gstMonth')?.value || new Date().toISOString().slice(0,7);
+  window.location.href = `/api/gst/gstr1/export?month=${month}`;
+}
+async function downloadTallyXML(e) {
+  e.preventDefault();
+  const month = document.getElementById('gstMonth')?.value || new Date().toISOString().slice(0,7);
+  window.location.href = `/api/gst/tally/export?month=${month}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — PURCHASES & SUPPLIERS PAGE
+// ═══════════════════════════════════════════════════════════════════════════
+async function showPurchasesPage(tab) {
+  const c = document.getElementById('mainContent');
+  const activeTab = tab || 'purchases';
+  const tabs = [['purchases','Purchases/GRN'],['suppliers','Suppliers'],['pending','Pending Payments']];
+  c.innerHTML = `<div class="page-header"><div><div class="page-title">🚛 Purchases & Suppliers</div><div class="page-sub">Fuel deliveries, GRN, Supplier management, Payments</div></div>
+    <button onclick="showAddPurchaseModal()" class="btn btn-primary">+ Record Delivery</button></div>
+  <div style="display:flex;gap:6px;margin-bottom:16px">
+    ${tabs.map(([id,label])=>`<button onclick="showPurchasesPage('${id}')" style="padding:7px 16px;border-radius:8px;border:1px solid var(--border2);background:${activeTab===id?'var(--accent)':'var(--surface2)'};color:${activeTab===id?'#000':'var(--text)'};font-weight:600;cursor:pointer;font-size:12px">${label}</button>`).join('')}
+  </div>
+  <div id="purchasesBody"><div class="spinner"></div></div>`;
+
+  if (activeTab === 'purchases') {
+    const from = new Date(Date.now()-30*864e5).toISOString().slice(0,10);
+    const to   = new Date().toISOString().slice(0,10);
+    const [listRes, statsRes] = await Promise.all([
+      apiFetch(`/api/purchases2/list?from=${from}&to=${to}&limit=50`).then(r=>r.json()),
+      apiFetch(`/api/purchases2/stats`).then(r=>r.json())
+    ]);
+    const purchases = listRes.data || [];
+    const stats = statsRes.data || {};
+    document.getElementById('purchasesBody').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px">
+        ${[['Deliveries this Month',stats.monthStats?.count||0,''],
+           ['Total Litres','₹'+fmt(stats.monthStats?.litres||0)+' L','var(--accent)'],
+           ['Amount Paid','₹'+fmt(stats.monthStats?.amount),'var(--green)'],
+           ['GST (ITC)','₹'+fmt(stats.monthStats?.gst),'var(--yellow)']
+        ].map(([l,v,c])=>`<div style="background:var(--surface2);border-radius:10px;padding:12px;border:1px solid var(--border)">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:4px">${l}</div>
+          <div style="font-size:18px;font-weight:800;color:${c||'var(--text)'}">${v}</div>
+        </div>`).join('')}
+      </div>
+      <div style="background:var(--surface2);border-radius:12px;border:1px solid var(--border)">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <strong>Recent Deliveries (Last 30 Days)</strong>
+        </div>
+        <table class="data-table"><thead><tr><th>Date</th><th>Fuel</th><th>Qty (L)</th><th>Rate</th><th>Amount</th><th>Supplier</th><th>Invoice</th></tr></thead><tbody>
+          ${purchases.map(p=>`<tr><td>${p.purchase_date}</td><td><span class="fuel-name-${p.fuel_type?.toLowerCase()}">${p.fuel_type}</span><br><span style="font-size:10px;color:var(--text3)">${p.tank_name}</span></td><td style="font-weight:700">${fmt(p.quantity)}</td><td>₹${fmt(p.rate)}</td><td style="font-weight:700">₹${fmt(p.total_amount)}</td><td>${p.supplier_name||'—'}</td><td style="font-size:11px;color:var(--text3)">${p.invoice_no||'—'}</td></tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text3)">No deliveries in last 30 days</td></tr>'}
+        </tbody></table>
+      </div>`;
+  } else if (activeTab === 'suppliers') {
+    const res = await apiFetch('/api/purchases2/suppliers').then(r=>r.json());
+    const suppliers = res.data || [];
+    document.getElementById('purchasesBody').innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button onclick="showAddSupplierModal()" class="btn btn-primary" style="padding:8px 16px">+ Add Supplier</button>
+      </div>
+      <div style="background:var(--surface2);border-radius:12px;border:1px solid var(--border)">
+      <table class="data-table"><thead><tr><th>Supplier Name</th><th>GSTIN</th><th>Mobile</th><th>Total Deliveries</th><th>Total Purchased</th><th>Actions</th></tr></thead><tbody>
+        ${suppliers.map(s=>`<tr>
+          <td><strong>${s.name}</strong></td>
+          <td style="font-size:11px;color:var(--text3)">${s.gstin||'—'}</td>
+          <td>${s.mobile||'—'}</td>
+          <td>${s.delivery_count||0}</td>
+          <td style="font-weight:700">₹${fmt(s.total_purchased)}</td>
+          <td><button onclick="showSupplierLedger(${s.id},'${s.name.replace(/'/g,'')}')" style="background:var(--surface3);border:1px solid var(--border2);color:var(--text);font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer">Ledger</button></td>
+        </tr>`).join('')||'<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text3)">No suppliers yet</td></tr>'}
+      </tbody></table></div>`;
+  } else if (activeTab === 'pending') {
+    const res = await apiFetch('/api/purchases2/pending-payments').then(r=>r.json());
+    const pending = res.data || [];
+    document.getElementById('purchasesBody').innerHTML = `
+      <div style="background:var(--surface2);border-radius:12px;border:1px solid var(--border)">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border)"><strong>Pending Supplier Payments</strong></div>
+        <table class="data-table"><thead><tr><th>Supplier</th><th>Invoices</th><th>Last Delivery</th><th>Total Due</th><th>Action</th></tr></thead><tbody>
+          ${pending.map(p=>`<tr>
+            <td><strong>${p.name}</strong><br><span style="font-size:10px;color:var(--text3)">${p.gstin||''}</span></td>
+            <td>${p.invoices}</td>
+            <td>${p.last_delivery||'—'}</td>
+            <td style="font-weight:800;color:var(--red)">₹${fmt(p.total_due)}</td>
+            <td><button onclick="showPaySupplierModal(${p.supplier_id},'${p.name.replace(/'/g,'')}')" style="background:var(--green);border:none;color:#000;font-size:11px;font-weight:700;padding:5px 12px;border-radius:6px;cursor:pointer">Pay</button></td>
+          </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;padding:30px;color:var(--green)">✅ No pending payments</td></tr>'}
+        </tbody></table>
+      </div>`;
+  }
+}
+
+function showAddPurchaseModal() {
+  const modal = document.createElement('div');
+  modal.id = 'addPurchaseModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `<div style="background:var(--surface);border-radius:16px;padding:24px;width:100%;max-width:480px;border:1px solid var(--border)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:16px">🚛 Record Fuel Delivery / GRN</div>
+    <div class="form-group"><label>Tank</label><select id="purTankId" style="width:100%"><option value="">Loading...</option></select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>Quantity (Litres)</label><input id="purQty" type="number" step="0.01" placeholder="10000" style="width:100%"/></div>
+      <div class="form-group"><label>Rate per Litre (₹)</label><input id="purRate" type="number" step="0.01" placeholder="89.50" style="width:100%"/></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>GST Rate (%)</label><input id="purGst" type="number" value="0" style="width:100%"/></div>
+      <div class="form-group"><label>Date</label><input id="purDate" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:100%"/></div>
+    </div>
+    <div class="form-group"><label>Supplier</label><select id="purSupplierId" style="width:100%"><option value="">-- None --</option></select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>Invoice No</label><input id="purInvoice" type="text" placeholder="Optional" style="width:100%"/></div>
+      <div class="form-group"><label>Density</label><input id="purDensity" type="number" step="0.001" placeholder="0.720" style="width:100%"/></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="submitPurchase()" class="btn btn-primary" style="flex:1">Record Delivery</button>
+      <button onclick="document.getElementById('addPurchaseModal').remove()" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:10px;border-radius:8px;cursor:pointer">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  // Load tanks and suppliers
+  apiFetch('/api/tanks').then(r=>r.json()).then(d => {
+    document.getElementById('purTankId').innerHTML = (d.data||[]).map(t=>`<option value="${t.id}">${t.tank_name} (${t.fuel_type})</option>`).join('');
+  });
+  apiFetch('/api/purchases2/suppliers').then(r=>r.json()).then(d => {
+    document.getElementById('purSupplierId').innerHTML = '<option value="">-- None --</option>' + (d.data||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  });
+}
+
+async function submitPurchase() {
+  const payload = {
+    tankId: +document.getElementById('purTankId').value,
+    quantity: document.getElementById('purQty').value,
+    rate: document.getElementById('purRate').value,
+    gstRate: document.getElementById('purGst').value,
+    purchaseDate: document.getElementById('purDate').value,
+    supplierId: document.getElementById('purSupplierId').value || undefined,
+    invoiceNo: document.getElementById('purInvoice').value || undefined,
+    density: document.getElementById('purDensity').value || undefined,
+  };
+  const r = await apiFetch('/api/purchases2', { method:'POST', body: JSON.stringify(payload) });
+  const d = await r.json();
+  if (d.success) { showToast('Delivery recorded! New stock: '+d.newStock+'L'); document.getElementById('addPurchaseModal')?.remove(); showPurchasesPage(); }
+  else showToast(d.error||'Failed', 'error');
+}
+
+function showAddSupplierModal() {
+  const modal = document.createElement('div');
+  modal.id = 'addSupModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `<div style="background:var(--surface);border-radius:16px;padding:24px;width:100%;max-width:440px;border:1px solid var(--border)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:16px">Add Supplier</div>
+    <div class="form-group"><label>Supplier Name *</label><input id="supName" type="text" placeholder="HPCL Dealer" style="width:100%"/></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>GSTIN</label><input id="supGstin" type="text" maxlength="15" style="width:100%"/></div>
+      <div class="form-group"><label>Mobile</label><input id="supMobile" type="tel" style="width:100%"/></div>
+    </div>
+    <div class="form-group"><label>Bank Name</label><input id="supBank" type="text" style="width:100%"/></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>Account No</label><input id="supAccNo" type="text" style="width:100%"/></div>
+      <div class="form-group"><label>IFSC</label><input id="supIfsc" type="text" style="width:100%"/></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="submitAddSupplier()" class="btn btn-primary" style="flex:1">Add Supplier</button>
+      <button onclick="document.getElementById('addSupModal').remove()" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:10px;border-radius:8px;cursor:pointer">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function submitAddSupplier() {
+  const payload = { name: document.getElementById('supName').value, gstin: document.getElementById('supGstin').value, mobile: document.getElementById('supMobile').value, bankName: document.getElementById('supBank').value, accountNo: document.getElementById('supAccNo').value, ifsc: document.getElementById('supIfsc').value };
+  const r = await apiFetch('/api/purchases2/suppliers', { method:'POST', body: JSON.stringify(payload) });
+  const d = await r.json();
+  if (d.success) { showToast('Supplier added!'); document.getElementById('addSupModal')?.remove(); showPurchasesPage('suppliers'); }
+  else showToast(d.error||'Failed', 'error');
+}
+
+async function showSupplierLedger(supplierId, supplierName) {
+  const res = await apiFetch(`/api/purchases2/supplier/${supplierId}/ledger`).then(r=>r.json());
+  if (!res.success) return showToast('Could not load ledger', 'error');
+  const { purchases, payments, totalPurchased, totalPaid, outstanding } = res.data;
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto';
+  modal.innerHTML = `<div style="background:var(--surface);border-radius:16px;padding:24px;width:100%;max-width:640px;border:1px solid var(--border);max-height:90vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:16px;font-weight:800">📋 Ledger: ${supplierName}</div>
+      <button onclick="this.closest('div[style*=fixed]').remove()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+      <div style="background:var(--surface2);padding:12px;border-radius:8px;text-align:center"><div style="font-size:10px;color:var(--text3)">Total Purchased</div><div style="font-size:16px;font-weight:800">₹${fmt(totalPurchased)}</div></div>
+      <div style="background:var(--surface2);padding:12px;border-radius:8px;text-align:center"><div style="font-size:10px;color:var(--text3)">Total Paid</div><div style="font-size:16px;font-weight:800;color:var(--green)">₹${fmt(totalPaid)}</div></div>
+      <div style="background:var(--surface2);padding:12px;border-radius:8px;text-align:center"><div style="font-size:10px;color:var(--text3)">Outstanding</div><div style="font-size:16px;font-weight:800;color:${outstanding>0?'var(--red)':'var(--green)'}">₹${fmt(outstanding)}</div></div>
+    </div>
+    <table class="data-table"><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead><tbody>
+      ${purchases.map(p=>`<tr><td>${p.purchase_date}</td><td>${p.fuel_type} ${p.quantity}L ${p.invoice_no?'· Invoice: '+p.invoice_no:''}</td><td style="text-align:right;color:var(--red)">-₹${fmt(p.total_amount)}</td></tr>`).join('')}
+      ${payments.map(p=>`<tr style="background:rgba(70,200,70,.07)"><td>${p.payment_date}</td><td>Payment — ${p.payment_mode}${p.reference_no?' · Ref: '+p.reference_no:''}</td><td style="text-align:right;color:var(--green)">+₹${fmt(p.amount)}</td></tr>`).join('')}
+    </tbody></table>
+    <button onclick="showPaySupplierModal(${supplierId},'${supplierName.replace(/'/g,'')}')" class="btn btn-primary" style="width:100%;margin-top:16px">Record Payment</button>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+function showPaySupplierModal(supplierId, supplierName) {
+  const modal = document.createElement('div');
+  modal.id = 'paySupModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `<div style="background:var(--surface);border-radius:16px;padding:24px;width:100%;max-width:400px;border:1px solid var(--border)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:16px">💳 Pay: ${supplierName}</div>
+    <div class="form-group"><label>Amount (₹)</label><input id="paySupAmt" type="number" step="0.01" style="width:100%"/></div>
+    <div class="form-group"><label>Payment Mode</label><select id="paySupMode" style="width:100%"><option value="neft">NEFT</option><option value="rtgs">RTGS</option><option value="upi">UPI</option><option value="cheque">Cheque</option><option value="cash">Cash</option></select></div>
+    <div class="form-group"><label>Reference No</label><input id="paySupRef" type="text" style="width:100%"/></div>
+    <div class="form-group"><label>Date</label><input id="paySupDate" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:100%"/></div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button onclick="submitSupplierPayment(${supplierId})" class="btn btn-primary" style="flex:1">Record Payment</button>
+      <button onclick="document.getElementById('paySupModal').remove()" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:10px;border-radius:8px;cursor:pointer">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+
+async function submitSupplierPayment(supplierId) {
+  const payload = { amount: document.getElementById('paySupAmt').value, paymentMode: document.getElementById('paySupMode').value, referenceNo: document.getElementById('paySupRef').value, paymentDate: document.getElementById('paySupDate').value };
+  const r = await apiFetch(`/api/purchases2/supplier/${supplierId}/payment`, { method:'POST', body: JSON.stringify(payload) });
+  const d = await r.json();
+  if (d.success) { showToast('Payment recorded!'); document.getElementById('paySupModal')?.remove(); showPurchasesPage('pending'); }
+  else showToast(d.error||'Failed', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — ADVANCED REPORTS PAGE
+// ═══════════════════════════════════════════════════════════════════════════
+async function showAdvancedReports(reportType) {
+  const c = document.getElementById('mainContent');
+  const rpt = reportType || 'pl-litre';
+  const today = new Date().toISOString().slice(0,10);
+  const m30 = new Date(Date.now()-30*864e5).toISOString().slice(0,10);
+  const reportButtons = [
+    ['pl-litre','📊 P&L per Litre'],['nozzle','⛽ Nozzle-wise'],['shift-cmp','📋 Shift Comparison'],
+    ['age-out','🏢 Age Outstanding'],['cash-acc','💵 Cash Accuracy'],['month-cmp','📅 Month Comparison'],
+    ['expiry','⚠️ Expiry Alerts'],['emp-perf','👷 Employee Performance']
+  ];
+  c.innerHTML = `<div class="page-header"><div><div class="page-title">📈 Advanced Reports</div><div class="page-sub">200+ auto-generated reports for owners, managers & accountants</div></div></div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px">
+    ${reportButtons.map(([id,label])=>`<button onclick="showAdvancedReports('${id}')" style="padding:6px 12px;border-radius:8px;border:1px solid var(--border2);background:${rpt===id?'var(--accent)':'var(--surface2)'};color:${rpt===id?'#000':'var(--text)'};font-weight:600;cursor:pointer;font-size:11px">${label}</button>`).join('')}
+  </div>
+  <div id="rpt2Body"><div class="spinner"></div></div>`;
+
+  if (rpt === 'pl-litre') {
+    const res = await apiFetch(`/api/reports2/pl-per-litre?from=${m30}&to=${today}`).then(r=>r.json());
+    const { fuelwise, totals } = res.data || {};
+    document.getElementById('rpt2Body').innerHTML = `
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px;border:1px solid var(--border)">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Last 30 Days Summary</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+          ${[['Revenue','₹'+fmt(totals?.revenue)],['COGS','₹'+fmt(totals?.cost)],['Gross Profit','₹'+fmt(totals?.margin)],['Margin/L','₹'+fmt(totals?.marginPerLitre)]].map(([l,v])=>`<div><div style="font-size:10px;color:var(--text3)">${l}</div><div style="font-size:16px;font-weight:800">${v}</div></div>`).join('')}
+        </div>
+      </div>
+      <table class="data-table"><thead><tr><th>Fuel</th><th>Revenue</th><th>Litres Sold</th><th>Avg Sale Rate</th><th>Purchase Cost</th><th>Gross Margin</th><th>Margin/L</th><th>Margin%</th></tr></thead><tbody>
+        ${(fuelwise||[]).map(f=>`<tr>
+          <td><span class="fuel-name-${f.fuelType?.toLowerCase()}">${f.fuelType}</span></td>
+          <td style="font-weight:700">₹${fmt(f.revenue)}</td><td>${fmt(f.litres)} L</td>
+          <td>₹${fmt(f.avgSaleRate)}</td><td style="color:var(--red)">₹${fmt(f.purchaseCost)}</td>
+          <td style="font-weight:700;color:var(--green)">₹${fmt(f.grossMargin)}</td>
+          <td style="font-weight:800;color:var(--accent)">₹${fmt(f.marginPerLitre)}</td>
+          <td>${fmt(f.marginPct)}%</td>
+        </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text3)">No data. Record purchases to see margin analysis.</td></tr>'}
+      </tbody></table>`;
+
+  } else if (rpt === 'nozzle') {
+    const res = await apiFetch(`/api/reports2/nozzle-wise?from=${m30}&to=${today}`).then(r=>r.json());
+    const nozzles = res.data?.nozzles || [];
+    document.getElementById('rpt2Body').innerHTML = `
+      <table class="data-table"><thead><tr><th>Nozzle</th><th>Fuel</th><th>Tank</th><th>Transactions</th><th>Litres</th><th>Revenue</th><th>Avg Fill</th></tr></thead><tbody>
+        ${nozzles.map(n=>`<tr><td style="font-weight:700">${n.nozzle_name||'(No nozzle)'}</td><td><span class="fuel-name-${n.fuel_type?.toLowerCase()}">${n.fuel_type}</span></td><td>${n.tank_name||'—'}</td><td>${n.txns}</td><td>${fmt(n.litres)} L</td><td style="font-weight:700">₹${fmt(n.revenue)}</td><td>${fmt(n.avg_fill)} L</td></tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text3)">No sales data in last 30 days</td></tr>'}
+      </tbody></table>`;
+
+  } else if (rpt === 'shift-cmp') {
+    const res = await apiFetch(`/api/reports2/shift-comparison?from=${m30}&to=${today}`).then(r=>r.json());
+    const shifts = res.data?.shifts || [];
+    document.getElementById('rpt2Body').innerHTML = `
+      <table class="data-table"><thead><tr><th>Shift</th><th>Date</th><th>Txns</th><th>Litres</th><th>Total Sales</th><th>Cash</th><th>UPI</th><th>Variance</th><th>Status</th></tr></thead><tbody>
+        ${shifts.map(s=>`<tr>
+          <td style="font-weight:700">${s.shift_name}</td>
+          <td>${s.open_time?.slice(0,10)}</td>
+          <td>${s.txns||0}</td><td>${fmt(s.litres)} L</td>
+          <td style="font-weight:700">₹${fmt(s.total_sales)}</td>
+          <td>₹${fmt(s.cash_collected)}</td><td>₹${fmt(s.upi_collected)}</td>
+          <td style="color:${(s.cash_variance||0)<-5?'var(--red)':(s.cash_variance||0)>5?'var(--yellow)':'var(--green)'}">
+            ${(s.cash_variance||0)>=0?'+':''}₹${fmt(s.cash_variance)}</td>
+          <td><span class="badge badge-${s.status==='open'?'ms':'cash'}">${s.status}</span></td>
+        </tr>`).join('')||'<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text3)">No shifts in last 30 days</td></tr>'}
+      </tbody></table>`;
+
+  } else if (rpt === 'age-out') {
+    const res = await apiFetch('/api/reports2/age-outstanding').then(r=>r.json());
+    const { summary, total } = res.data || {};
+    document.getElementById('rpt2Body').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px">
+        ${(summary||[]).map(b=>`<div style="background:var(--surface2);border-radius:10px;padding:12px;border:1px solid var(--border)">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase">${b.range} Days</div>
+          <div style="font-size:20px;font-weight:800;color:${b.range==='90+'?'var(--red)':b.range==='61-90'?'var(--yellow)':'var(--text)'}">₹${fmt(b.outstanding)}</div>
+          <div style="font-size:11px;color:var(--text3)">${b.count} customer${b.count!==1?'s':''}</div>
+        </div>`).join('')}
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;border:2px solid var(--accent)">
+          <div style="font-size:10px;color:var(--text3)">TOTAL OUTSTANDING</div>
+          <div style="font-size:20px;font-weight:800;color:var(--red)">₹${fmt(total)}</div>
+        </div>
+      </div>
+      ${(summary||[]).map(b=>b.customers.length > 0 ? `<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:12px;border:1px solid var(--border)">
+        <div class="section-title">${b.range} Days — ${b.customers.length} Customers</div>
+        <table class="data-table"><thead><tr><th>Customer</th><th>Mobile</th><th>Credit Limit</th><th>Outstanding</th><th>Days Overdue</th></tr></thead><tbody>
+          ${b.customers.map(c=>`<tr><td><strong>${c.company_name}</strong></td><td>${c.mobile||'—'}</td><td>₹${fmt(c.credit_limit)}</td><td style="font-weight:800;color:var(--red)">₹${fmt(c.outstanding)}</td><td style="color:var(--yellow)">${c.daysOverdue} days</td></tr>`).join('')}
+        </tbody></table>
+      </div>` : '').join('')}`;
+
+  } else if (rpt === 'cash-acc') {
+    const res = await apiFetch(`/api/reports2/cash-accuracy?from=${m30}&to=${today}`).then(r=>r.json());
+    const { summary, shifts } = res.data || {};
+    document.getElementById('rpt2Body').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px">
+        ${[['Total Shifts',summary?.totalShifts,''],['Short Shifts',summary?.shortShifts,'var(--red)'],
+           ['Excess Shifts',summary?.excessShifts,'var(--yellow)'],['Accuracy Rate',(summary?.accuracyRate||0)+'%','var(--green)'],
+           ['Total Short','₹'+fmt(summary?.totalShort),'var(--red)'],['Total Excess','₹'+fmt(summary?.totalExcess),'var(--yellow)']
+        ].map(([l,v,co])=>`<div style="background:var(--surface2);border-radius:10px;padding:12px;border:1px solid var(--border)">
+          <div style="font-size:10px;color:var(--text3)">${l}</div><div style="font-size:18px;font-weight:800;color:${co||'var(--text)'}">${v}</div>
+        </div>`).join('')}
+      </div>
+      <table class="data-table"><thead><tr><th>Shift</th><th>Date</th><th>Opened By</th><th>Cash Collected</th><th>Cash Physical</th><th>Variance</th></tr></thead><tbody>
+        ${(shifts||[]).map(s=>`<tr><td>${s.shift_name}</td><td>${s.open_time?.slice(0,10)}</td><td>${s.opened_by||'—'}</td><td>₹${fmt(s.cash_collected)}</td><td>₹${fmt(s.cash_physical)}</td><td style="font-weight:700;color:${(s.cash_variance||0)<-5?'var(--red)':(s.cash_variance||0)>5?'var(--yellow)':'var(--green)'}">${(s.cash_variance||0)>=0?'+':''}₹${fmt(s.cash_variance)}</td></tr>`).join('')||'<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text3)">No closed shifts in last 30 days</td></tr>'}
+      </tbody></table>`;
+
+  } else if (rpt === 'month-cmp') {
+    const res = await apiFetch('/api/reports2/month-comparison?months=6').then(r=>r.json());
+    const data = res.data || [];
+    document.getElementById('rpt2Body').innerHTML = `
+      <table class="data-table"><thead><tr><th>Month</th><th>Revenue</th><th>Litres</th><th>Transactions</th><th>Cash</th><th>UPI</th><th>Credit</th><th>Growth</th></tr></thead><tbody>
+        ${data.map(m=>`<tr><td style="font-weight:700">${m.month}</td><td style="font-weight:800">₹${fmt(m.revenue)}</td><td>${fmt(m.litres)} L</td><td>${m.txns}</td><td>₹${fmt(m.cash)}</td><td>₹${fmt(m.upi)}</td><td>₹${fmt(m.credit)}</td>
+          <td style="color:${m.revenueGrowthPct===null?'var(--text3)':m.revenueGrowthPct>=0?'var(--green)':'var(--red)'};font-weight:700">
+            ${m.revenueGrowthPct===null?'—':(m.revenueGrowthPct>=0?'↑':'↓')+Math.abs(m.revenueGrowthPct)+'%'}</td>
+        </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text3)">No data yet</td></tr>'}
+      </tbody></table>`;
+
+  } else if (rpt === 'expiry') {
+    const res = await apiFetch('/api/reports2/expiry-alerts?days=60').then(r=>r.json());
+    const { expired, expiring } = res.data || {};
+    document.getElementById('rpt2Body').innerHTML = `
+      ${expired?.length > 0 ? `<div style="background:rgba(255,70,70,.1);border:1px solid var(--red);border-radius:12px;padding:16px;margin-bottom:14px">
+        <div class="section-title" style="color:var(--red)">🔴 EXPIRED Products (${expired.length})</div>
+        <table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Expired On</th></tr></thead><tbody>
+          ${expired.map(p=>`<tr><td style="font-weight:700">${p.product_name}</td><td>${p.category}</td><td style="color:var(--red)">${p.stock_qty} ${p.unit}</td><td style="color:var(--red)">${p.expiry_date}</td></tr>`).join('')}
+        </tbody></table>
+      </div>` : ''}
+      ${expiring?.length > 0 ? `<div style="background:rgba(255,200,50,.08);border:1px solid var(--yellow);border-radius:12px;padding:16px">
+        <div class="section-title" style="color:var(--yellow)">🟡 Expiring in 60 Days (${expiring.length})</div>
+        <table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Expires On</th><th>Days Left</th></tr></thead><tbody>
+          ${expiring.map(p=>`<tr><td style="font-weight:700">${p.product_name}</td><td>${p.category}</td><td>${p.stock_qty} ${p.unit}</td><td>${p.expiry_date}</td><td style="color:${p.days_to_expiry<=7?'var(--red)':p.days_to_expiry<=14?'var(--yellow)':'var(--text)'};font-weight:700">${p.days_to_expiry} days</td></tr>`).join('')}
+        </tbody></table>
+      </div>` : '<div class="empty" style="padding:40px 0">✅ No products expiring in the next 60 days</div>'}`;
+
+  } else if (rpt === 'emp-perf') {
+    const month = new Date().toISOString().slice(0,7);
+    const res = await apiFetch(`/api/reports2/employee-performance?month=${month}`).then(r=>r.json());
+    const employees = res.data?.employees || [];
+    document.getElementById('rpt2Body').innerHTML = `
+      <table class="data-table"><thead><tr><th>Employee</th><th>Role</th><th>Shifts Opened</th><th>Shifts Closed</th><th>Days Present</th><th>Days Absent</th><th>Short Shifts</th></tr></thead><tbody>
+        ${employees.map(e=>`<tr><td><strong>${e.full_name}</strong><br><span style="font-size:10px;color:var(--text3)">${e.emp_code||''}${e.username?' · @'+e.username:''}</span></td><td><span class="badge badge-${e.role==='owner'?'ms':e.role==='manager'?'hsd':'cash'}">${e.role}</span></td><td>${e.shifts_opened||0}</td><td>${e.shifts_closed||0}</td><td style="color:var(--green)">${e.days_present||0}</td><td style="color:${(e.days_absent||0)>3?'var(--red)':'var(--text)'}">${e.days_absent||0}</td><td style="color:${(e.short_shifts||0)>1?'var(--red)':'var(--text)'}">${e.short_shifts||0}</td></tr>`).join('')||'<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text3)">No employee data</td></tr>'}
+      </tbody></table>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — PAYSLIP PDF GENERATION
+// ═══════════════════════════════════════════════════════════════════════════
+async function generatePayslipPDF(payrollId) {
+  try {
+    const res = await apiFetch(`/api/payroll/${payrollId}/payslip`).then(r=>r.json());
+    if (!res.success) return showToast('Could not load payslip data', 'error');
+    const { payroll: p, attendance: att } = res.data;
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+    // Header
+    doc.setFillColor(14, 15, 20);
+    doc.rect(0, 0, 210, 40, 'F');
+    doc.setTextColor(245, 166, 35);
+    doc.setFontSize(22);
+    doc.setFont('helvetica','bold');
+    doc.text('⛽ FuelBunk Pro', 15, 18);
+    doc.setTextColor(200, 200, 200);
+    doc.setFontSize(9);
+    doc.text(p.station_name, 15, 26);
+    doc.text(p.station_address || '', 15, 31);
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(14);
+    doc.setFont('helvetica','bold');
+    doc.text('SALARY PAYSLIP', 210-15, 18, { align:'right' });
+    doc.setFontSize(9);
+    doc.setFont('helvetica','normal');
+    doc.text(`Month: ${String(p.payroll_month).padStart(2,'0')}/${p.payroll_year}`, 210-15, 26, { align:'right' });
+    doc.text(`Payslip ID: #${p.id}`, 210-15, 31, { align:'right' });
+
+    // Employee Details
+    doc.setTextColor(0,0,0);
+    doc.setFillColor(245,246,248);
+    doc.rect(15, 45, 180, 32, 'F');
+    doc.setFontSize(11);
+    doc.setFont('helvetica','bold');
+    doc.text(p.full_name, 20, 55);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(9);
+    doc.text(`Employee Code: ${p.emp_code||'—'}  |  Role: ${p.role}`, 20, 62);
+    doc.text(`Mobile: ${p.mobile||'—'}  |  Joined: ${p.join_date||'—'}`, 20, 69);
+    doc.text(`Status: ${p.status.toUpperCase()}  |  Payment: ${p.payment_mode||'—'}  |  Date: ${p.payment_date||'—'}`, 20, 76);
+
+    // Attendance
+    doc.setFillColor(255,255,255);
+    doc.setFontSize(10);
+    doc.setFont('helvetica','bold');
+    doc.text('ATTENDANCE', 15, 90);
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(9);
+    const attData = [
+      ['Working Days', p.working_days],['Days Present', p.days_present],
+      ['Days Absent', p.days_absent],['Half Days', p.half_days],
+      ['Overtime Hours', p.overtime_hours]
+    ];
+    doc.autoTable({ startY:93, head:[], body: attData.map(([l,v])=>['','',l,v]), margin:{left:15,right:15}, tableWidth:90, styles:{fontSize:9}, columnStyles:{0:{cellWidth:0},1:{cellWidth:0},2:{cellWidth:50},3:{cellWidth:40}} });
+
+    // Earnings & Deductions
+    const startY = doc.lastAutoTable.finalY + 6;
+    doc.setFont('helvetica','bold'); doc.setFontSize(10);
+    doc.text('EARNINGS', 15, startY);
+    doc.text('DEDUCTIONS', 115, startY);
+    doc.autoTable({ startY: startY+3, head:[['Description','Amount (₹)']],
+      body:[['Basic Salary','₹'+fmt(p.base_salary)],['Overtime','₹'+fmt(p.overtime_amount)],['Gross Salary','₹'+fmt(p.gross_salary)]],
+      margin:{left:15}, tableWidth:85, styles:{fontSize:9}, headStyles:{fillColor:[245,166,35],textColor:[0,0,0]} });
+    doc.autoTable({ startY: startY+3, head:[['Description','Amount (₹)']],
+      body:[['Salary Advance','₹'+fmt(p.advance_deduction)],['Other','₹'+fmt(p.other_deductions)],['Total Deductions','₹'+fmt(p.advance_deduction+p.other_deductions)]],
+      margin:{left:115}, tableWidth:80, styles:{fontSize:9}, headStyles:{fillColor:[50,50,60],textColor:[255,255,255]} });
+
+    // Net Salary
+    const netY = doc.lastAutoTable.finalY + 10;
+    doc.setFillColor(245,166,35);
+    doc.rect(15, netY, 180, 14, 'F');
+    doc.setTextColor(0,0,0);
+    doc.setFontSize(13);
+    doc.setFont('helvetica','bold');
+    doc.text('NET SALARY PAYABLE:', 20, netY+9);
+    doc.text('₹ '+fmt(p.net_salary), 210-20, netY+9, { align:'right' });
+
+    // Footer
+    doc.setTextColor(150,150,150);
+    doc.setFontSize(8);
+    doc.setFont('helvetica','italic');
+    doc.text('This is a computer-generated payslip. — FuelBunk Pro', 105, 285, { align:'center' });
+
+    doc.save(`Payslip_${p.full_name.replace(/\s+/g,'_')}_${p.payroll_year}-${String(p.payroll_month).padStart(2,'0')}.pdf`);
+    showToast('Payslip downloaded!');
+  } catch(e) {
+    showToast('PDF generation failed: '+e.message, 'error');
+    console.error(e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — SHIFT CONFIGURATION PAGE
+// ═══════════════════════════════════════════════════════════════════════════
+async function showShiftConfig() {
+  const c = document.getElementById('mainContent');
+  c.innerHTML = `<div class="page-header"><div><div class="page-title">⏰ Shift Configuration</div><div class="page-sub">Define Morning / Afternoon / Night shifts with nozzle assignments</div></div>
+    <button onclick="showAddShiftConfigModal()" class="btn btn-primary">+ Add Shift</button></div>
+  <div id="shiftConfigBody"><div class="spinner"></div></div>`;
+
+  const [cfgRes, nozzleRes] = await Promise.all([
+    apiFetch('/api/shift-configs').then(r=>r.json()),
+    apiFetch('/api/shifts/nozzles').then(r=>r.json())
+  ]);
+  const configs = cfgRes.data || [];
+  const nozzles = nozzleRes.data || [];
+
+  document.getElementById('shiftConfigBody').innerHTML = `
+    <div style="background:var(--surface2);border-radius:12px;padding:16px;border:1px solid var(--border);margin-bottom:16px">
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Shift configurations are templates that auto-populate nozzle assignments when opening a shift. Attendants can still override at shift-open time.</div>
+      ${configs.length === 0 ? `<div class="empty" style="padding:32px 0">
+        <div class="empty-icon">⏰</div>No shift configs yet.<br>Add Morning/Afternoon/Night shifts to speed up shift opening.
+        <br><button onclick="showAddShiftConfigModal()" class="btn btn-primary" style="margin-top:12px">+ Add First Shift</button>
+      </div>` : `
+      <div style="display:grid;gap:10px">
+        ${configs.map(cfg => {
+          let nozzleIds = []; try { nozzleIds = JSON.parse(cfg.default_nozzle_ids||'[]'); } catch {}
+          const nozzleNames = nozzleIds.map(id => nozzles.find(n=>n.id===id)?.nozzle_name || '#'+id).join(', ');
+          return `<div style="background:var(--surface);border-radius:10px;padding:14px;border:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+            <div>
+              <div style="font-size:15px;font-weight:800">${cfg.shift_name}</div>
+              <div style="font-size:12px;color:var(--text3);margin-top:2px">${cfg.start_time} — ${cfg.end_time}</div>
+              ${nozzleNames ? `<div style="font-size:11px;color:var(--text2);margin-top:4px">Nozzles: ${nozzleNames}</div>` : ''}
+            </div>
+            <div style="display:flex;gap:8px">
+              <button onclick="toggleShiftConfig(${cfg.id},${cfg.is_active})" style="background:${cfg.is_active?'var(--green)':'var(--surface2)'};border:1px solid var(--border2);color:${cfg.is_active?'#000':'var(--text)'};font-size:11px;font-weight:700;padding:5px 12px;border-radius:6px;cursor:pointer">${cfg.is_active?'Active':'Inactive'}</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`}
+    </div>
+    <div style="background:var(--surface2);border-radius:12px;padding:16px;border:1px solid var(--border)">
+      <div class="section-title">ℹ️ How to Use</div>
+      <div style="font-size:12px;color:var(--text3);line-height:1.8">
+        1. Create shift configs (e.g. Morning 06:00–14:00, Afternoon 14:00–22:00, Night 22:00–06:00)<br>
+        2. Assign default nozzles to each shift<br>
+        3. When opening a shift, select a config → nozzles auto-populate<br>
+        4. Multiple shifts can run simultaneously for different dispensers
+      </div>
+    </div>`;
+}
+
+function showAddShiftConfigModal() {
+  apiFetch('/api/shifts/nozzles').then(r=>r.json()).then(nRes => {
+    const nozzles = nRes.data || [];
+    const modal = document.createElement('div');
+    modal.id = 'addShiftCfgModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    modal.innerHTML = `<div style="background:var(--surface);border-radius:16px;padding:24px;width:100%;max-width:440px;border:1px solid var(--border)">
+      <div style="font-size:16px;font-weight:800;margin-bottom:16px">⏰ Add Shift Configuration</div>
+      <div class="form-group"><label>Shift Name *</label><input id="scName" type="text" placeholder="Morning Shift" style="width:100%"/></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label>Start Time</label><input id="scStart" type="time" value="06:00" style="width:100%"/></div>
+        <div class="form-group"><label>End Time</label><input id="scEnd" type="time" value="14:00" style="width:100%"/></div>
+      </div>
+      <div class="form-group"><label>Default Nozzles (select multiple)</label>
+        <div style="background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px;max-height:120px;overflow-y:auto">
+          ${nozzles.map(n=>`<label style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer">
+            <input type="checkbox" name="scNozzle" value="${n.id}"/> 
+            <span>${n.nozzle_name} (${n.fuel_type})</span>
+          </label>`).join('')||'<span style="color:var(--text3);font-size:12px">No nozzles configured</span>'}
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button onclick="submitShiftConfig()" class="btn btn-primary" style="flex:1">Save Config</button>
+        <button onclick="document.getElementById('addShiftCfgModal').remove()" style="flex:1;background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:10px;border-radius:8px;cursor:pointer">Cancel</button>
+      </div>
+    </div>`;
+    document.body.appendChild(modal);
+  });
+}
+
+async function submitShiftConfig() {
+  const nozzleIds = [...document.querySelectorAll('input[name=scNozzle]:checked')].map(el=>+el.value);
+  const payload = { shiftName: document.getElementById('scName').value, startTime: document.getElementById('scStart').value, endTime: document.getElementById('scEnd').value, nozzleIds };
+  const r = await apiFetch('/api/shift-configs', { method:'POST', body: JSON.stringify(payload) });
+  const d = await r.json();
+  if (d.success) { showToast('Shift config saved!'); document.getElementById('addShiftCfgModal')?.remove(); showShiftConfig(); }
+  else showToast(d.error||'Failed', 'error');
+}
+
+async function toggleShiftConfig(id, current) {
+  const r = await apiFetch(`/api/shift-configs/${id}`, { method:'PUT', body: JSON.stringify({ isActive: !current }) });
+  const d = await r.json();
+  if (d.success) { showToast('Updated!'); showShiftConfig(); }
+  else showToast(d.error||'Failed', 'error');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — OFFLINE INDEXEDDB SALE QUEUE
+// ═══════════════════════════════════════════════════════════════════════════
+const OfflineQueue = {
+  DB_NAME: 'FuelBunkOffline', STORE: 'sale_queue', VERSION: 1,
+  async open() {
+    return new Promise((res, rej) => {
+      const req = indexedDB.open(this.DB_NAME, this.VERSION);
+      req.onupgradeneeded = e => e.target.result.createObjectStore(this.STORE, { keyPath:'clientId' });
+      req.onsuccess = e => res(e.target.result);
+      req.onerror = () => rej(req.error);
+    });
+  },
+  async queue(sale) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(this.STORE, 'readwrite');
+      tx.objectStore(this.STORE).put({ ...sale, clientId: 'sale_'+Date.now()+'_'+Math.random().toString(36).slice(2), status:'pending', createdAt: new Date().toISOString() });
+      tx.oncomplete = () => res(true);
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+  async getAll() {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const req = db.transaction(this.STORE, 'readonly').objectStore(this.STORE).getAll();
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+  },
+  async clear(clientIds) {
+    const db = await this.open();
+    const tx = db.transaction(this.STORE, 'readwrite');
+    for (const id of clientIds) tx.objectStore(this.STORE).delete(id);
+    return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+  }
+};
+
+// Sync offline queue when back online
+async function syncOfflineQueue() {
+  if (!navigator.onLine) return;
+  try {
+    const pending = await OfflineQueue.getAll();
+    const unsent = pending.filter(s => s.status === 'pending');
+    if (unsent.length === 0) return;
+    const r = await apiFetch('/api/offline-sync/sales', { method:'POST', body: JSON.stringify({ sales: unsent }) });
+    const d = await r.json();
+    if (d.success) {
+      const syncedIds = d.results.filter(r=>r.status==='synced'||r.status==='duplicate').map(r=>r.clientId);
+      await OfflineQueue.clear(syncedIds);
+      if (d.synced > 0) showToast(`✅ ${d.synced} offline sale${d.synced>1?'s':''} synced!`);
+      if (d.failed > 0) showToast(`⚠️ ${d.failed} offline sales failed to sync`, 'error');
+    }
+  } catch(e) { console.warn('[Offline] Sync failed:', e.message); }
+}
+
+// Register online event for auto-sync
+window.addEventListener('online', () => {
+  showToast('🌐 Back online! Syncing offline sales...');
+  syncOfflineQueue();
+});
+
+// Check on app load
+setTimeout(() => { if (navigator.onLine) syncOfflineQueue(); }, 3000);
+
 </script>
 </body>
 </html>

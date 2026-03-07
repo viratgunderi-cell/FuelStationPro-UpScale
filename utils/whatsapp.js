@@ -152,6 +152,21 @@ const templates = {
   creditSaleBill(stationName, companyName, invoiceNo, fuelType, qty, rate, amount, outstanding, stationMobile) {
     const fmt = v => '₹' + (v||0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
     return `🧾 *FUEL CREDIT BILL*\n\n🏪 ${stationName}\n📄 Invoice: *${invoiceNo}*\n🏢 Customer: ${companyName}\n\n⛽ ${fuelType} × ${qty}L @ ${fmt(rate)}/L\n💰 Bill Amount: *${fmt(amount)}*\n📊 Total Outstanding: *${fmt(outstanding)}*\n\nKindly settle dues at earliest.\n📞 ${stationMobile||'Contact station'}\n\n_— FuelBunk Pro_`;
+  },
+
+  // Sprint 7: Product expiry alert
+  expiryAlert(stationName, expiredItems, expiringItems) {
+    let msg = `⚠️ *PRODUCT EXPIRY ALERT*\n\n🏪 ${stationName}\n`;
+    if (expiredItems.length > 0) {
+      msg += `\n🔴 *EXPIRED (${expiredItems.length} products):*\n`;
+      expiredItems.forEach(p => { msg += `  • ${p.product_name} — *${p.stock_qty} ${p.unit}* in stock\n`; });
+    }
+    if (expiringItems.length > 0) {
+      msg += `\n🟡 *EXPIRING SOON:*\n`;
+      expiringItems.forEach(p => { msg += `  • ${p.product_name} — expires in *${p.days_to_expiry} days* (${p.expiry_date})\n`; });
+    }
+    msg += `\nPlease take action to avoid stock loss.\n\n_— FuelBunk Pro_`;
+    return msg;
   }
 };
 

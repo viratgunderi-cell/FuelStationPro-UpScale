@@ -787,4 +787,147 @@ router.get('/bank-recon/summary', async (req, res) => {
   }});
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — SHIFT CONFIGS (Multi-shift: Morning/Afternoon/Night)
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get('/shift-configs', async (req, res) => {
+  try {
+    const data = await db.all(`SELECT * FROM shift_configs WHERE station_id=? AND is_active=1 ORDER BY sort_order,shift_name`, [req.user.stationId]);
+    res.json({ success: true, data });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+router.post('/shift-configs', authorize('owner'), async (req, res) => {
+  try {
+    const sid = req.user.stationId;
+    const { shiftName, startTime, endTime, nozzleIds, sortOrder } = req.body;
+    if (!shiftName) return res.status(400).json({ success: false, error: 'shiftName required.' });
+    const r = await db.run(`INSERT OR REPLACE INTO shift_configs (station_id,shift_name,start_time,end_time,default_nozzle_ids,sort_order)
+      VALUES (?,?,?,?,?,?)`,
+      [sid, shiftName, startTime||'06:00', endTime||'14:00',
+       JSON.stringify(nozzleIds||[]), sortOrder||0]);
+    res.status(201).json({ success: true, id: r.lastInsertRowid, message: 'Shift config saved.' });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+router.put('/shift-configs/:id', authorize('owner'), async (req, res) => {
+  try {
+    const sid = req.user.stationId;
+    const { shiftName, startTime, endTime, nozzleIds, sortOrder, isActive } = req.body;
+    await db.run(`UPDATE shift_configs SET
+        shift_name=COALESCE(?,shift_name), start_time=COALESCE(?,start_time),
+        end_time=COALESCE(?,end_time), default_nozzle_ids=COALESCE(?,default_nozzle_ids),
+        sort_order=COALESCE(?,sort_order), is_active=COALESCE(?,is_active)
+        WHERE id=? AND station_id=?`,
+      [shiftName||null, startTime||null, endTime||null,
+       nozzleIds ? JSON.stringify(nozzleIds) : null,
+       sortOrder!=null ? sortOrder : null,
+       isActive!=null ? (isActive?1:0) : null,
+       req.params.id, sid]);
+    res.json({ success: true, message: 'Shift config updated.' });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — PAYSLIP DATA (for PDF generation in frontend)
+// ═══════════════════════════════════════════════════════════════════════════
+
+router.get('/payroll/:id/payslip', async (req, res) => {
+  try {
+    const sid = req.user.stationId;
+    const pr = await db.get(`
+      SELECT p.*, e.full_name, e.emp_code, e.role, e.mobile, e.join_date,
+        st.station_name, st.address as station_address, st.mobile as station_mobile
+      FROM payroll_runs p
+      JOIN employees e ON e.id=p.employee_id
+      JOIN stations st ON st.id=p.station_id
+      WHERE p.id=? AND p.station_id=?`, [req.params.id, sid]);
+    if (!pr) return res.status(404).json({ success: false, error: 'Payroll record not found.' });
+
+    const advances = await db.all(`SELECT * FROM salary_advances WHERE employee_id=? AND status='active' ORDER BY advance_date`, [pr.employee_id]);
+    // attendance has work_date TEXT — filter by payroll period using strftime
+    const monthStr = String(pr.payroll_month).padStart(2, '0');
+    const periodYM = `${pr.payroll_year}-${monthStr}`;
+    const attendance = await db.get(`SELECT
+        COUNT(CASE WHEN status='present' THEN 1 END) as present,
+        COUNT(CASE WHEN status='absent' THEN 1 END) as absent,
+        COUNT(CASE WHEN status='half_day' THEN 1 END) as half_day,
+        COUNT(CASE WHEN status='leave' THEN 1 END) as leave
+      FROM attendance WHERE employee_id=? AND station_id=?
+        AND strftime('%Y-%m', work_date)=?`,
+      [pr.employee_id, sid, periodYM]).catch(() => null);
+
+    res.json({ success: true, data: { payroll: pr, advances, attendance } });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7 — OFFLINE SALE SYNC
+// ═══════════════════════════════════════════════════════════════════════════
+
+// POST /api/offline-sync/sales — batch sync offline-queued sales
+router.post('/offline-sync/sales', async (req, res) => {
+  try {
+    const sid = req.user.stationId;
+    const { sales } = req.body; // Array of { clientId, fuelType, quantity, rate, paymentMode, shiftId, ... }
+    if (!Array.isArray(sales) || sales.length === 0) {
+      return res.status(400).json({ success: false, error: 'sales array required.' });
+    }
+
+    const results = [];
+    const station = await db.get('SELECT station_code FROM stations WHERE id=?', [sid]);
+
+    for (const s of sales) {
+      try {
+        const { clientId, fuelType, quantity, rate, paymentMode, shiftId, vehicleNo, customerId, saleTime } = s;
+
+        // Check for duplicate using offline_sale_queue (reliable idempotency by clientId)
+        if (!clientId) { results.push({ clientId: null, status: 'failed', error: 'clientId required' }); continue; }
+        const existing = await db.get(
+          'SELECT status, synced_invoice_no FROM offline_sale_queue WHERE station_id=? AND client_id=?',
+          [sid, clientId]).catch(() => null);
+        if (existing) {
+          results.push({ clientId, status: 'duplicate', invoiceNo: existing.synced_invoice_no });
+          continue;
+        }
+
+        const qty = parseFloat(quantity), r = parseFloat(rate);
+        if (!qty || !r || !fuelType || !shiftId) { results.push({ clientId, status: 'failed', error: 'Missing fields' }); continue; }
+
+        const shift = await db.get('SELECT id,status FROM shifts WHERE id=? AND station_id=?', [shiftId, sid]);
+        if (!shift) { results.push({ clientId, status: 'failed', error: 'Shift not found' }); continue; }
+
+        const tank = await db.get('SELECT * FROM tanks WHERE station_id=? AND fuel_type=? AND is_active=1 LIMIT 1', [sid, fuelType]);
+        if (!tank) { results.push({ clientId, status: 'failed', error: 'Tank not found' }); continue; }
+
+        const amount  = Math.round(qty * r * 100) / 100;
+        const invoiceNo = `${station.station_code}OFF${Date.now().toString().slice(-8)}`;
+
+        await db.transaction(async t => {
+          await t.run(`INSERT INTO sales (station_id,invoice_no,shift_id,tank_id,fuel_type,quantity,rate,amount,total_amount,payment_mode,vehicle_no,customer_id,served_by,sale_time)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            [sid, invoiceNo, shiftId, tank.id, fuelType, qty, r, amount, amount,
+             paymentMode||'cash', vehicleNo||null, customerId||null, req.user.id,
+             saleTime || new Date().toISOString()]);
+          await t.run(`UPDATE tanks SET current_stock=MAX(0,current_stock-?),updated_at=datetime('now') WHERE id=?`, [qty, tank.id]);
+          // Record in queue for idempotency
+          await t.run(
+            `INSERT OR IGNORE INTO offline_sale_queue (station_id,client_id,payload,status,synced_invoice_no,synced_at) VALUES (?,?,?,?,?,datetime('now'))`,
+            [sid, clientId, JSON.stringify(s), 'synced', invoiceNo]);
+        });
+
+        results.push({ clientId, status: 'synced', invoiceNo, amount });
+      } catch(err) {
+        results.push({ clientId: s.clientId, status: 'failed', error: err.message });
+      }
+    }
+
+    const synced = results.filter(r => r.status === 'synced').length;
+    const failed = results.filter(r => r.status === 'failed').length;
+    res.json({ success: true, synced, failed, duplicate: results.filter(r=>r.status==='duplicate').length, results });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 module.exports = router;
+

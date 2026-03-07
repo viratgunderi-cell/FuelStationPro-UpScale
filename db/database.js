@@ -394,6 +394,63 @@ async function initSchema() {
     `CREATE INDEX IF NOT EXISTS idx_users_station ON users(station_id)`,
     `CREATE INDEX IF NOT EXISTS idx_tanks_station ON tanks(station_id)`,
     `CREATE INDEX IF NOT EXISTS idx_audit_station ON audit_log(station_id)`,
+
+    // ── SPRINT 7: SUPPLIER PAYMENTS ───────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS supplier_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+      amount REAL NOT NULL,
+      payment_mode TEXT NOT NULL DEFAULT 'neft',
+      reference_no TEXT,
+      payment_date TEXT NOT NULL DEFAULT (date('now')),
+      notes TEXT,
+      recorded_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_sup_pay_station ON supplier_payments(station_id, supplier_id)`,
+
+    // ── SPRINT 7: SUPPLIER BANK DETAILS (ALTER — safe) ───────────────────
+    `ALTER TABLE suppliers ADD COLUMN bank_name TEXT`,
+    `ALTER TABLE suppliers ADD COLUMN account_no TEXT`,
+    `ALTER TABLE suppliers ADD COLUMN ifsc_code TEXT`,
+    `ALTER TABLE suppliers ADD COLUMN address TEXT`,
+    `ALTER TABLE suppliers ADD COLUMN email TEXT`,
+
+    // ── SPRINT 7: SHIFT CONFIGS (multi-shift Morning/Afternoon/Night) ─────
+    `CREATE TABLE IF NOT EXISTS shift_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      shift_name TEXT NOT NULL,
+      start_time TEXT NOT NULL DEFAULT '06:00',
+      end_time TEXT NOT NULL DEFAULT '14:00',
+      default_nozzle_ids TEXT DEFAULT '[]',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(station_id, shift_name)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_shift_configs_station ON shift_configs(station_id)`,
+
+    // ── SPRINT 7: OFFLINE SALE QUEUE (for IndexedDB sync) ────────────────
+    `CREATE TABLE IF NOT EXISTS offline_sale_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      client_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','synced','failed')),
+      synced_invoice_no TEXT,
+      error_msg TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at TEXT,
+      UNIQUE(station_id, client_id)
+    )`,
+
+    // ── SPRINT 7: NOTIFICATION SETTINGS extra fields ──────────────────────
+    `ALTER TABLE notification_settings ADD COLUMN expiry_alert_enabled INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE notification_settings ADD COLUMN expiry_alert_days INTEGER NOT NULL DEFAULT 30`,
+    `ALTER TABLE notification_settings ADD COLUMN sms_enabled INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE notification_settings ADD COLUMN sms_number TEXT`,
   ];
   for (const s of tables) {
     await client.execute(s).catch(e => { if(!e.message?.includes('already exists')) console.warn('[DB]',e.message?.substring(0,60)); });

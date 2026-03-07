@@ -394,3 +394,56 @@ async function triggerCreditSaleBill(stationId, saleData) {
 
 module.exports.triggerMeterMismatch   = triggerMeterMismatch;
 module.exports.triggerCreditSaleBill  = triggerCreditSaleBill;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 7: PRODUCT EXPIRY ALERT CRON
+// Runs daily at 08:00 IST — alerts owner about expired/expiring lubes
+// ═══════════════════════════════════════════════════════════════════════════
+async function runExpiryAlertCron() {
+  try {
+    const stations = await db.all(`
+      SELECT ns.station_id, ns.wa_number, ns.wa_enabled,
+        COALESCE(ns.expiry_alert_enabled, 1) as expiry_alert_enabled,
+        COALESCE(ns.expiry_alert_days, 30) as expiry_alert_days,
+        s.station_name
+      FROM notification_settings ns
+      JOIN stations s ON s.id = ns.station_id
+      WHERE ns.wa_enabled=1 AND ns.wa_number IS NOT NULL`, []);
+
+    for (const ns of stations) {
+      if (!ns.expiry_alert_enabled) continue;
+
+      const products = await db.all(`
+        SELECT product_name, stock_qty, unit, expiry_date,
+          CAST(julianday(expiry_date) - julianday('now') AS INTEGER) as days_to_expiry
+        FROM products WHERE station_id=? AND is_active=1 AND expiry_date IS NOT NULL
+          AND expiry_date <= date('now', '+' || ? || ' days')
+        ORDER BY expiry_date ASC`, [ns.station_id, ns.expiry_alert_days]);
+
+      if (products.length === 0) continue;
+
+      const expired  = products.filter(p => p.days_to_expiry <= 0);
+      const expiring = products.filter(p => p.days_to_expiry > 0);
+
+      // Don't spam — check if already sent today
+      const sentToday = await db.get(
+        `SELECT id FROM notification_log WHERE station_id=? AND type='expiry_alert' AND date(sent_at)=date('now')`,
+        [ns.station_id]);
+      if (sentToday) continue;
+
+      const msg = templates.expiryAlert(ns.station_name, expired, expiring);
+      try {
+        const result = await sendWhatsApp(ns.wa_number, msg);
+        await logNotification(ns.station_id, 'expiry_alert', ns.wa_number, msg, 'sent', result.provider, null,
+          { expired: expired.length, expiring: expiring.length, auto: true });
+      } catch(e) {
+        await logNotification(ns.station_id, 'expiry_alert', ns.wa_number, msg, 'failed', PROVIDER, e.message, null);
+      }
+    }
+  } catch(e) {
+    console.error('[WA] Expiry alert cron failed:', e.message);
+  }
+}
+
+module.exports.runExpiryAlertCron = runExpiryAlertCron;
+
