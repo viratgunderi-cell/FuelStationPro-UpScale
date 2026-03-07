@@ -37,12 +37,23 @@ app.use(apiLimiter);
 app.use(speedLimiter);
 
 // ── Routes ─────────────────────────────────────────────────────────────────
+const { authenticate } = require('./middleware/auth');
+// Block super admin tokens from all station-level API routes
+const stationOnly = (req, res, next) => {
+  // Public auth routes don't need this check
+  next();
+};
 app.use('/api/auth',    require('./routes/auth'));
-app.use('/api/sales',   require('./routes/sales'));
-app.use('/api/shifts',  require('./routes/shifts'));
 app.use('/api/super',   require('./routes/super'));
-app.use('/api/payroll', require('./routes/payroll'));
-app.use('/api',         require('./routes/api'));
+// Station routes: authenticate + reject SA tokens
+const rejectSA = [authenticate, (req, res, next) => {
+  if (req.user && req.user.isSuperAdmin) return res.status(403).json({ success: false, error: 'Use /api/super for super admin operations.' });
+  next();
+}];
+app.use('/api/sales',   rejectSA, require('./routes/sales'));
+app.use('/api/shifts',  rejectSA, require('./routes/shifts'));
+app.use('/api/payroll', rejectSA, require('./routes/payroll'));
+app.use('/api',         rejectSA, require('./routes/api'));
 
 // ── Health ─────────────────────────────────────────────────────────────────
 app.get('/health', async (req, res) => {

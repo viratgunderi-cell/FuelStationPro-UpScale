@@ -37,7 +37,22 @@ router.put('/:id/close', authorize('owner','manager'), async (req, res) => {
   const variance = cashPhysical - (shift.cash_collected || 0);
   await db.run(`UPDATE shifts SET status='closed',closed_by=?,close_time=datetime('now'),cash_physical=?,cash_variance=?,notes=?,closing_readings='{}' WHERE id=?`,
     [req.user.id, cashPhysical, variance, notes, shift.id]);
-  res.json({ success: true, message: 'Shift closed.', variance, cashCollected: shift.cash_collected });
+  res.json({
+    success: true,
+    message: 'Shift closed.',
+    variance,
+    cashCollected: shift.cash_collected,
+    summary: {
+      totalSales: shift.total_sales || 0,
+      cashCollected: shift.cash_collected || 0,
+      upiCollected: shift.upi_collected || 0,
+      cardCollected: shift.card_collected || 0,
+      creditSales: shift.credit_sales || 0,
+      cashPhysical: cashPhysical,
+      variance: variance,
+      shiftName: shift.shift_name
+    }
+  });
 });
 
 module.exports = router;

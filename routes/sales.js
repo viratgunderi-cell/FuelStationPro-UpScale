@@ -36,7 +36,7 @@ router.post('/', heavyLimiter,
   [body('fuelType').isIn(['MS','HSD','CNG']),
    body('quantity').isFloat({min:0.01}),
    body('rate').isFloat({min:0.01}),
-   body('paymentMode').isIn(['cash','phonepe','gpay','paytm','card','credit','other']),
+   body('paymentMode').isIn(['cash','upi','phonepe','gpay','paytm','card','credit','neft','other']),
    body('nozzleId').optional().isInt({min:1}),
    body('shiftId').isInt({min:1}),
    body('vehicleNo').optional().trim().escape(),
@@ -71,8 +71,13 @@ router.post('/', heavyLimiter,
           [sid, invoiceNo, shiftId, nozzleId||null, tank.id, fuelType, quantity, rate, amount, amount, paymentMode, upiRef||null, customerId||null, vehicleNo||null, req.user.id]);
         await t.run(`UPDATE tanks SET current_stock=current_stock-?,updated_at=datetime('now') WHERE id=?`, [quantity, tank.id]);
         if (paymentMode==='credit' && customerId) await t.run(`UPDATE credit_customers SET outstanding=outstanding+?,updated_at=datetime('now') WHERE id=?`, [amount, customerId]);
-        await t.run(`UPDATE shifts SET total_sales=total_sales+?,${paymentMode==='cash'?'cash_collected=cash_collected+?':paymentMode.includes('pay')||paymentMode==='gpay'?'upi_collected=upi_collected+?':paymentMode==='card'?'card_collected=card_collected+?':paymentMode==='credit'?'credit_sales=credit_sales+?':'total_sales=total_sales+?'} WHERE id=?`,
-          [amount, amount, shiftId]);
+        const isUPI = ['upi','phonepe','gpay','paytm'].includes(paymentMode) || paymentMode.includes('pay') || paymentMode==='gpay';
+        const shiftCol = paymentMode==='cash'?'cash_collected':isUPI?'upi_collected':paymentMode==='card'?'card_collected':paymentMode==='credit'?'credit_sales':null;
+        if (shiftCol) {
+          await t.run(`UPDATE shifts SET total_sales=total_sales+?,${shiftCol}=${shiftCol}+? WHERE id=?`, [amount, amount, shiftId]);
+        } else {
+          await t.run(`UPDATE shifts SET total_sales=total_sales+? WHERE id=?`, [amount, shiftId]);
+        }
       });
       await db.logAudit(sid, req.user.id, req.user.username, 'SALE', 'sales', null, null, {invoiceNo, fuelType, quantity, amount, paymentMode}, req.ip, req.get('user-agent'));
       res.status(201).json({ success: true, message: 'Sale recorded.', invoiceNo, amount });

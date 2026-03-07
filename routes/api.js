@@ -62,9 +62,19 @@ router.post('/employees', authorize('owner','manager'), [
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
   const { fullName, role, mobile, salary, joinDate, empCode } = req.body;
-  await db.run('INSERT INTO employees (station_id,full_name,role,mobile,salary,join_date,emp_code) VALUES (?,?,?,?,?,?,?)',
-    [req.user.stationId, fullName, role, mobile||null, salary||0, joinDate||null, empCode||null]);
-  res.status(201).json({ success: true, message: 'Employee added.' });
+  try {
+    if (empCode) {
+      const dup = await db.get('SELECT id FROM employees WHERE station_id=? AND emp_code=? AND is_active=1', [req.user.stationId, empCode]);
+      if (dup) return res.status(409).json({ success: false, error: 'Employee code already exists.' });
+    }
+    const result = await db.run('INSERT INTO employees (station_id,full_name,role,mobile,salary,join_date,emp_code) VALUES (?,?,?,?,?,?,?)',
+      [req.user.stationId, fullName, role, mobile||null, salary||0, joinDate||null, empCode||null]);
+    res.status(201).json({ success: true, message: 'Employee added.', employeeId: result.lastInsertRowid||result.lastID });
+  } catch(e) {
+    if (e.message && e.message.includes('UNIQUE')) return res.status(409).json({ success: false, error: 'Employee code already exists.' });
+    console.error('[emp/post]', e.message);
+    res.status(500).json({ success: false, error: 'Server error.' });
+  }
 });
 
 // ── CREDIT CUSTOMERS ──────────────────────────────────────────────────────
@@ -80,9 +90,9 @@ router.post('/customers', authorize('owner','manager'), [
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
   const { companyName, contactName, mobile, email, gstin, creditLimit } = req.body;
-  await db.run('INSERT INTO credit_customers (station_id,company_name,contact_name,mobile,email,gstin,credit_limit) VALUES (?,?,?,?,?,?,?)',
+  const result = await db.run('INSERT INTO credit_customers (station_id,company_name,contact_name,mobile,email,gstin,credit_limit) VALUES (?,?,?,?,?,?,?)',
     [req.user.stationId, companyName, contactName||null, mobile||null, email||null, gstin||null, creditLimit]);
-  res.status(201).json({ success: true, message: 'Customer added.' });
+  res.status(201).json({ success: true, message: 'Customer added.', customerId: result.lastInsertRowid||result.lastID });
 });
 
 router.get('/customers/:id/statement', async (req, res) => {
@@ -110,17 +120,26 @@ router.post('/customers/:id/payment', authorize('owner','manager'), async (req, 
 router.get('/dashboard', async (req, res) => {
   const sid = req.user.stationId;
   const today = new Date().toISOString().slice(0,10);
-  const [todaySales, todayRevenue, topPayments, tanks, openShift, topCredit, weekTrend, recentSales] = await Promise.all([
-    db.get(`SELECT COUNT(*) as c FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0`, [sid, today]),
-    db.get(`SELECT COALESCE(SUM(total_amount),0) as r FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0`, [sid, today]),
-    db.all(`SELECT payment_mode, COALESCE(SUM(total_amount),0) as amount FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0 GROUP BY payment_mode`, [sid, today]),
+  const [todaySummary, topPayments, tanks, openShift, topCredit, weekTrend, recentSales, creditStats] = await Promise.all([
+    db.get(`SELECT COUNT(*) as c, COALESCE(SUM(total_amount),0) as r, COALESCE(SUM(quantity),0) as litres, COALESCE(SUM(CASE WHEN payment_mode='cash' THEN total_amount ELSE 0 END),0) as cash FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0`, [sid, today]),
+    db.all(`SELECT payment_mode, COALESCE(SUM(total_amount),0) as amount, COUNT(*) as txns FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0 GROUP BY payment_mode ORDER BY amount DESC`, [sid, today]),
     db.all('SELECT id,tank_name,fuel_type,current_stock,capacity,min_alert FROM tanks WHERE station_id=? AND is_active=1', [sid]),
-    db.get(`SELECT sh.*,u.full_name as opened_by_name FROM shifts sh LEFT JOIN users u ON u.id=sh.opened_by WHERE sh.station_id=? AND sh.status='open' LIMIT 1`, [sid]),
+    db.get(`SELECT sh.*,u.full_name as opened_by_name, (SELECT COUNT(*) FROM sales WHERE shift_id=sh.id AND is_cancelled=0) as sales_count FROM shifts sh LEFT JOIN users u ON u.id=sh.opened_by WHERE sh.station_id=? AND sh.status='open' LIMIT 1`, [sid]),
     db.all('SELECT company_name,outstanding FROM credit_customers WHERE station_id=? AND outstanding>0 AND is_active=1 ORDER BY outstanding DESC LIMIT 5', [sid]),
     db.all(`SELECT date(sale_time) as d, COALESCE(SUM(total_amount),0) as rev FROM sales WHERE station_id=? AND date(sale_time)>=date('now','-6 days') AND is_cancelled=0 GROUP BY d ORDER BY d`, [sid]),
-    db.all(`SELECT invoice_no,fuel_type,quantity,total_amount,payment_mode,sale_time FROM sales WHERE station_id=? AND is_cancelled=0 ORDER BY sale_time DESC LIMIT 10`, [sid])
+    db.all(`SELECT invoice_no,fuel_type,quantity,total_amount,payment_mode,sale_time FROM sales WHERE station_id=? AND is_cancelled=0 ORDER BY sale_time DESC LIMIT 10`, [sid]),
+    db.get(`SELECT COALESCE(SUM(outstanding),0) as total, COUNT(*) as accounts FROM credit_customers WHERE station_id=? AND outstanding>0 AND is_active=1`, [sid])
   ]);
-  res.json({ success: true, data: { todaySales: todaySales.c, todayRevenue: todayRevenue.r, topPayments, tanks, openShift, topCredit, weekTrend, recentSales } });
+  res.json({ success: true, data: {
+    todaySales: todaySummary.c,
+    todayRevenue: todaySummary.r,
+    todayLitres: todaySummary.litres,
+    cashToday: todaySummary.cash,
+    totalCredit: creditStats.total,
+    creditAccounts: creditStats.accounts,
+    paymentBreakdown: topPayments,
+    topPayments, tanks, openShift, topCredit, weekTrend, recentSales
+  }});
 });
 
 // ── REPORTS ───────────────────────────────────────────────────────────────
@@ -196,6 +215,12 @@ router.get('/settings/audit', authorize('owner','manager'), async (req, res) => 
   res.json({ success: true, data });
 });
 
+// Audit log top-level alias
+router.get('/audit', authorize('owner','manager'), async (req, res) => {
+  const data = await db.all('SELECT * FROM audit_log WHERE station_id=? ORDER BY created_at DESC LIMIT 200', [req.user.stationId]);
+  res.json({ success: true, data });
+});
+
 module.exports = router;
 
 // ── SPRINT 1: Enhanced Reports ────────────────────────────────────────────
@@ -230,7 +255,7 @@ router.get('/reports/daily-enhanced', async (req, res) => {
     db.all(`SELECT n.nozzle_name,s.fuel_type,COUNT(*) as txns,ROUND(SUM(s.quantity),2) as qty,ROUND(SUM(s.total_amount),2) as amount FROM sales s LEFT JOIN nozzles n ON n.id=s.nozzle_id WHERE s.station_id=? AND date(s.sale_time)=? AND s.is_cancelled=0 GROUP BY s.nozzle_id ORDER BY n.nozzle_name`, [sid,date]),
     db.get(`SELECT COUNT(*) as txns, ROUND(SUM(total_amount),2) as revenue, ROUND(SUM(quantity),2) as litres FROM sales WHERE station_id=? AND date(sale_time)=? AND is_cancelled=0`, [sid,date])
   ]);
-  res.json({ success: true, data: { date, fuelWise, paymentWise, shiftWise, hourly, nozzleWise, totals } });
+  res.json({ success: true, data: { date, fuelBreakdown: fuelWise, paymentBreakdown: paymentWise, fuelWise, paymentWise, shiftWise, hourly, nozzleWise, totals } });
 });
 
 // Credit customers with overdue info

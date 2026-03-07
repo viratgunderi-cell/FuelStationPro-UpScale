@@ -80,9 +80,9 @@ router.post('/super/login', authLimiter,
 
 // ── Station Registration ───────────────────────────────────────────────────
 router.post('/register',
-  [body('stationCode').trim().notEmpty().isLength({min:4,max:10}).matches(/^[A-Z0-9]+$/i).escape(),
+  [body('stationCode').trim().notEmpty().isLength({min:2,max:10}).matches(/^[A-Z0-9]+$/i).escape(),
    body('stationName').trim().notEmpty().isLength({max:100}).escape(),
-   body('ownerUsername').trim().notEmpty().isLength({min:4,max:30}).escape(),
+   body('ownerUsername').trim().notEmpty().isLength({min:2,max:30}).escape(),
    body('ownerPassword').isLength({min:8,max:128}).matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])/),
    body('ownerFullName').trim().notEmpty().escape(),
    body('mobile').optional().isMobilePhone('en-IN')],
