@@ -2338,6 +2338,9 @@ async function showDipChart(tankId, tankName, fuelType){
   const { data } = await res.json();
   const tank = data.tank || {};
   const chart = data.chart || [];
+  // Populate cache so testConvert works from this screen
+  _dipChartCache[parseInt(tankId)] = chart;
+  _dipTankStock[parseInt(tankId)] = tank.current_stock || 0;
   const c = document.getElementById('mainContent');
   c.innerHTML = `
     <button class="back-btn" onclick="showTankDipMenu(${tankId},'${(tank.tank_name||tankName).replace(/'/g,'\\'')}','${tank.fuel_type||fuelType}')">← Back</button>
@@ -2567,11 +2570,11 @@ async function showVarianceAlerts(){
   c.innerHTML = `
     <button class="back-btn" onclick="showDipHub()">← Back</button>
     <div class="section-title">🚨 Variance Alerts — Last 30 Days</div>
-    <div class="stat-grid" style="gap:8px;margin-bottom:12px">
-      <div class="stat-card"><div class="stat-value">${alerts.length}</div><div class="stat-label">Total Readings</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:var(--red)">${flagged.length}</div><div class="stat-label">Flagged</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:var(--yellow)">${unack.length}</div><div class="stat-label">Unacknowledged</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:var(--green)">${flagged.length-unack.length}</div><div class="stat-label">Acknowledged</div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div class="stat-card"><div class="stat-card-value">${alerts.length}</div><div class="stat-card-label">Total Readings</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--red)">${flagged.length}</div><div class="stat-card-label">Flagged</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--yellow)">${unack.length}</div><div class="stat-card-label">Unacknowledged</div></div>
+      <div class="stat-card"><div class="stat-card-value" style="color:var(--green)">${flagged.length-unack.length}</div><div class="stat-card-label">Acknowledged</div></div>
     </div>
     <!-- Per-tank summary -->
     <div class="card" style="margin-bottom:12px">

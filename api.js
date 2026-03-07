@@ -221,8 +221,6 @@ router.get('/audit', authorize('owner','manager'), async (req, res) => {
   res.json({ success: true, data });
 });
 
-module.exports = router;
-
 // ── SPRINT 1: Enhanced Reports ────────────────────────────────────────────
 
 // Stock Movement: opening → purchases → sales → closing per tank per date range
@@ -378,8 +376,8 @@ router.post('/tanks/dip-reading-v2', authorize('owner', 'manager'), async (req, 
     // Save dip reading
     await t.run(
       `INSERT INTO dip_readings (station_id,tank_id,dip_mm,calculated_litres,actual_stock,variance,reading_type,taken_by,notes)
-       VALUES (?,?,?,?,?,?,'dip_chart',?,?)`,
-      [req.user.stationId, tankId, dipMm, calculatedLitres, calculatedLitres, variance, req.user.id, notes || null]
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      [req.user.stationId, tankId, dipMm, calculatedLitres, calculatedLitres, variance, hasChart ? 'dip_chart' : 'manual', req.user.id, notes || null]
     );
     // Update tank stock to dip reading value
     await t.run(`UPDATE tanks SET current_stock=?,updated_at=datetime('now') WHERE id=?`, [calculatedLitres, tankId]);
@@ -471,3 +469,5 @@ function interpolateDip(chart, mm) {
   }
   return chart[chart.length - 1].litres;
 }
+
+module.exports = router;
