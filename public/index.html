@@ -5,265 +5,619 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
 <title>FuelBunk Pro</title>
 <link rel="manifest" href="/manifest.json"/>
-<meta name="theme-color" content="#0f1117"/>
-<!-- Sprint 1: Chart.js, jsPDF, SheetJS -->
+<meta name="theme-color" content="#09090e"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-:root{--bg:#0f1117;--surface:#1a1f2e;--surface2:#232838;--border:#2d3348;--accent:#f97316;--accent2:#3b82f6;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--text:#f1f5f9;--muted:#94a3b8;--radius:12px}
+/* ═══════════════════════════════════════════════════════
+   FUELBUNK PRO — DESIGN SYSTEM v2
+   Dark · Amber · Professional
+═══════════════════════════════════════════════════════ */
+:root{
+  --bg:#09090e;
+  --sidebar:#0e0f14;
+  --surface:#13151c;
+  --surface2:#1a1c24;
+  --surface3:#1f2230;
+  --border:#1e2028;
+  --border2:#252836;
+  --accent:#f5a623;
+  --accent-dim:rgba(245,166,35,.12);
+  --accent-hover:#e8981a;
+  --accent2:#5b7af5;
+  --green:#22c55e;
+  --green-dim:rgba(34,197,94,.12);
+  --red:#ef4444;
+  --red-dim:rgba(239,68,68,.12);
+  --yellow:#f59e0b;
+  --purple:#a855f7;
+  --text:#e8eaf0;
+  --text2:#9499a8;
+  --text3:#5c6070;
+  --radius:10px;
+  --radius-lg:14px;
+  --shadow:0 4px 24px rgba(0,0,0,.45);
+  --shadow-lg:0 8px 40px rgba(0,0,0,.6);
+  --sidebar-w:240px;
+}
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;overflow-x:hidden}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;min-height:100vh;overflow-x:hidden;font-size:14px;-webkit-font-smoothing:antialiased}
 .hidden{display:none!important}
-/* AUTH */
-#authScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#0f1117 0%,#1a1f2e 100%)}
-.auth-card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:40px;width:100%;max-width:440px;box-shadow:0 25px 50px rgba(0,0,0,.5)}
-.auth-logo{text-align:center;margin-bottom:32px}
-.auth-logo .icon{font-size:48px;margin-bottom:8px}
-.auth-logo h1{font-size:24px;font-weight:700;color:var(--accent)}
-.auth-logo p{color:var(--muted);font-size:13px;margin-top:4px}
-.tab-bar{display:flex;background:var(--surface2);border-radius:10px;padding:4px;margin-bottom:28px;gap:4px}
-.tab-btn{flex:1;padding:8px;border:none;background:transparent;color:var(--muted);border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:.2s}
-.tab-btn.active{background:var(--accent);color:#fff}
-.form-group{margin-bottom:16px}
-.form-group label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
-.form-group input,.form-group select,.form-group textarea{width:100%;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;outline:none;transition:.2s;font-family:inherit}
-.form-group input:focus,.form-group select:focus{border-color:var(--accent)}
+
+/* ═══ SCROLLBAR ═══════════════════════════════════════ */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+
+/* ═══ AUTH ════════════════════════════════════════════ */
+#authScreen{
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:24px;background:var(--bg);position:relative;overflow:hidden;
+}
+#authScreen::before{
+  content:'';position:absolute;top:-200px;left:50%;transform:translateX(-50%);
+  width:600px;height:600px;background:radial-gradient(circle,rgba(245,166,35,.07) 0%,transparent 70%);
+  pointer-events:none;
+}
+.auth-logo-wrap{text-align:center;margin-bottom:36px}
+.auth-app-icon{
+  width:80px;height:80px;background:linear-gradient(135deg,#f5a623,#e8981a);
+  border-radius:22px;display:flex;align-items:center;justify-content:center;
+  font-size:36px;margin:0 auto 16px;box-shadow:0 8px 32px rgba(245,166,35,.35);
+}
+.auth-app-name{font-size:26px;font-weight:800;color:var(--text);letter-spacing:-.5px}
+.auth-app-sub{font-size:12px;color:var(--text2);margin-top:4px;letter-spacing:.5px}
+.auth-card{
+  background:var(--surface);border:1px solid var(--border2);border-radius:18px;
+  padding:28px;width:100%;max-width:420px;box-shadow:var(--shadow-lg);
+}
+.auth-tab-row{display:flex;background:var(--surface2);border-radius:10px;padding:3px;gap:3px;margin-bottom:24px}
+.auth-tab{flex:1;padding:9px 12px;border:none;background:transparent;color:var(--text2);
+  border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;transition:.2s;font-family:inherit;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.auth-tab.active{background:var(--surface3);color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.auth-form-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:14px;background:var(--surface2);border-radius:10px}
+.auth-form-icon{width:38px;height:38px;background:var(--accent);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.auth-form-title{font-size:14px;font-weight:700}
+.auth-form-sub{font-size:11px;color:var(--text2);margin-top:2px}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:10px;font-weight:700;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px}
+.form-group input,.form-group select,.form-group textarea{
+  width:100%;padding:11px 13px;background:var(--surface2);border:1px solid var(--border2);
+  border-radius:8px;color:var(--text);font-size:13px;outline:none;transition:.2s;font-family:inherit;
+}
+.form-group input:focus,.form-group select:focus{border-color:var(--accent);background:var(--surface3)}
 .form-group input[type="date"]{color-scheme:dark}
-.btn{width:100%;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:.2s;margin-top:4px;font-family:inherit}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-primary:hover{background:#ea6c0f}
+.form-group select option{background:var(--surface2)}
+.btn{width:100%;padding:13px;border:none;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;transition:.15s;margin-top:4px;font-family:inherit;letter-spacing:.2px}
+.btn-primary{background:var(--accent);color:#000}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-primary:active{transform:scale(.98)}
 .btn-secondary{background:var(--accent2);color:#fff}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
-.btn-sm{padding:8px 14px;font-size:12px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-family:inherit;width:auto}
+.btn-outline{background:transparent;border:1px solid var(--border2);color:var(--text)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.btn-sm{padding:7px 13px;font-size:11px;font-weight:700;border-radius:7px;border:none;cursor:pointer;font-family:inherit;width:auto;transition:.15s}
+.btn-sm:active{transform:scale(.96)}
+.btn-ghost{background:var(--surface2);border:1px solid var(--border2);color:var(--text2)}
+.btn-ghost:hover{color:var(--text);border-color:var(--border2)}
 /* ATTENDANCE BUTTONS */
-.att-btn{padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--muted);cursor:pointer;font-size:11px;font-weight:600;transition:.15s;font-family:inherit}
+.att-btn{padding:6px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--surface2);color:var(--text2);cursor:pointer;font-size:11px;font-weight:600;transition:.15s;font-family:inherit}
 .att-btn:hover{border-color:var(--accent);color:var(--text)}
-.att-active-present{background:rgba(34,197,94,.15)!important;border-color:var(--green)!important;color:var(--green)!important}
-.att-active-absent{background:rgba(239,68,68,.15)!important;border-color:var(--red)!important;color:#fca5a5!important}
-.att-active-half_day{background:rgba(234,179,8,.15)!important;border-color:var(--yellow)!important;color:var(--yellow)!important}
-.att-active-leave{background:rgba(59,130,246,.15)!important;border-color:var(--accent2)!important;color:#93c5fd!important}
-.att-active-holiday{background:rgba(249,115,22,.15)!important;border-color:var(--accent)!important;color:var(--accent)!important}
-.btn-pdf{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
-.btn-pdf:hover{background:rgba(239,68,68,.25)}
-.btn-excel{background:rgba(34,197,94,.15);color:#86efac;border:1px solid rgba(34,197,94,.3)}
-.btn-excel:hover{background:rgba(34,197,94,.25)}
-.alert{padding:12px 14px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none}
-.alert.error{background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#fca5a5;display:block}
-.alert.success{background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);color:#86efac;display:block}
-.divider{text-align:center;color:var(--muted);font-size:12px;margin:20px 0;position:relative}
-/* MAIN APP */
-#app{display:none;flex-direction:column;min-height:100vh}
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 16px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
-.topbar-left{display:flex;align-items:center;gap:10px}
-.topbar-logo{font-weight:700;font-size:16px;color:var(--accent)}
-.station-badge{background:var(--accent2);color:#fff;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700}
-.topbar-right{display:flex;align-items:center;gap:8px}
-.idle-bar{height:3px;background:var(--border);position:relative;overflow:hidden}
-.idle-progress{height:100%;background:var(--accent);transition:width 1s linear;width:100%}
-.main-content{flex:1;padding:16px;padding-bottom:80px;max-width:768px;margin:0 auto;width:100%}
-/* BOTTOM NAV */
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);display:flex;height:64px;z-index:100}
-.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:10px;font-weight:500;transition:.2s;padding:8px 0}
-.nav-item.active{color:var(--accent)}
-.nav-item svg{width:22px;height:22px}
-/* CARDS */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}
-.card-title{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
-.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
-.stat-card{background:var(--surface2);border-radius:10px;padding:14px}
-.stat-value{font-size:22px;font-weight:700;color:var(--accent)}
-.stat-label{font-size:11px;color:var(--muted);margin-top:2px}
-/* CHARTS */
-.chart-wrap{position:relative;height:180px;margin-top:8px}
-.chart-wrap-sm{position:relative;height:140px}
-.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
-/* TANK BARS */
-.tank-bar{background:var(--surface2);border-radius:8px;padding:12px;margin-bottom:8px}
-.tank-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.tank-name{font-size:13px;font-weight:600}
-.tank-pct{font-size:12px;color:var(--muted)}
-.progress-track{height:8px;background:var(--border);border-radius:4px;overflow:hidden}
-.progress-fill{height:100%;border-radius:4px;transition:.6s}
-.fuel-ms{background:linear-gradient(90deg,#22c55e,#16a34a)}
-.fuel-hsd{background:linear-gradient(90deg,#3b82f6,#1d4ed8)}
-.fuel-cng{background:linear-gradient(90deg,#f97316,#ea580c)}
-/* SALE FORM */
-.fuel-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
-.fuel-btn{padding:14px 8px;border:2px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);cursor:pointer;text-align:center;font-weight:600;transition:.2s}
-.fuel-btn.selected{border-color:var(--accent);background:rgba(249,115,22,.1)}
-.fuel-btn .fuel-price{font-size:11px;color:var(--muted);margin-top:2px}
-.amount-display{background:var(--surface2);border-radius:12px;padding:20px;text-align:center;margin-bottom:16px}
-.amount-display .rupee{font-size:36px;font-weight:700;color:var(--accent)}
-.amount-display .litres{font-size:13px;color:var(--muted);margin-top:4px}
-.keypad{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
-.key{padding:16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;font-size:18px;font-weight:600;cursor:pointer;text-align:center;transition:.1s;font-family:inherit}
-.key:active{background:var(--border);transform:scale(.95)}
-.key.key-del{background:rgba(239,68,68,.15);color:var(--red)}
-.pay-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px}
-.pay-btn{padding:12px 6px;border:2px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);cursor:pointer;text-align:center;font-size:12px;font-weight:600;transition:.2s}
-.pay-btn.selected{border-color:var(--green);background:rgba(34,197,94,.1);color:var(--green)}
-.mode-toggle{display:flex;background:var(--surface2);border-radius:8px;padding:3px;margin-bottom:12px;gap:3px}
-.mode-btn{flex:1;padding:8px;border:none;background:transparent;color:var(--muted);border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;transition:.2s}
-.mode-btn.active{background:var(--surface);color:var(--text)}
-/* LISTS */
-.list-item{background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
-.list-item-left{flex:1}
-.list-item-title{font-size:14px;font-weight:600}
-.list-item-sub{font-size:12px;color:var(--muted);margin-top:2px}
-.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase}
-.badge-ms{background:rgba(34,197,94,.2);color:#4ade80}
-.badge-hsd{background:rgba(59,130,246,.2);color:#93c5fd}
-.badge-cng{background:rgba(249,115,22,.2);color:#fdba74}
-.badge-cash{background:rgba(234,179,8,.2);color:#fbbf24}
-.badge-upi{background:rgba(139,92,246,.2);color:#c4b5fd}
-.badge-credit{background:rgba(239,68,68,.2);color:#fca5a5}
-.badge-overdue{background:rgba(239,68,68,.25);color:#fca5a5;border:1px solid rgba(239,68,68,.4)}
-.badge-ok{background:rgba(34,197,94,.2);color:#4ade80}
-/* TABLE */
-.data-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
-.data-table th{background:var(--surface2);padding:10px 8px;text-align:left;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.4px}
-.data-table td{padding:10px 8px;border-bottom:1px solid rgba(45,51,72,.5);vertical-align:middle}
+.att-active-present{background:var(--green-dim)!important;border-color:var(--green)!important;color:var(--green)!important}
+.att-active-absent{background:var(--red-dim)!important;border-color:var(--red)!important;color:#fca5a5!important}
+.att-active-half_day{background:rgba(245,158,11,.12)!important;border-color:var(--yellow)!important;color:var(--yellow)!important}
+.att-active-leave{background:rgba(91,122,245,.12)!important;border-color:var(--accent2)!important;color:#93c5fd!important}
+.att-active-holiday{background:var(--accent-dim)!important;border-color:var(--accent)!important;color:var(--accent)!important}
+.btn-pdf{background:var(--red-dim);color:#fca5a5;border:1px solid rgba(239,68,68,.25)}
+.btn-pdf:hover{background:rgba(239,68,68,.22)}
+.btn-excel{background:var(--green-dim);color:#86efac;border:1px solid rgba(34,197,94,.25)}
+.btn-excel:hover{background:rgba(34,197,94,.22)}
+.alert{padding:11px 13px;border-radius:8px;font-size:12px;margin-bottom:14px;display:none}
+.alert.error{background:var(--red-dim);border:1px solid rgba(239,68,68,.3);color:#fca5a5;display:block}
+.alert.success{background:var(--green-dim);border:1px solid rgba(34,197,94,.3);color:#86efac;display:block}
+.auth-footer{text-align:center;margin-top:20px;font-size:11px;color:var(--text3)}
+.auth-footer a{color:var(--accent);cursor:pointer;font-weight:600;text-decoration:none}
+
+/* ═══ APP SHELL ═══════════════════════════════════════ */
+#app{display:none;min-height:100vh}
+.app-layout{display:flex;min-height:100vh}
+
+/* ═══ SIDEBAR ═════════════════════════════════════════ */
+.sidebar{
+  width:var(--sidebar-w);flex-shrink:0;background:var(--sidebar);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;
+  position:fixed;top:0;left:0;height:100vh;z-index:200;
+  transition:transform .25s ease;
+}
+.sidebar-head{padding:20px 16px 16px;border-bottom:1px solid var(--border)}
+.sidebar-brand{display:flex;align-items:center;gap:11px}
+.sidebar-icon{
+  width:40px;height:40px;background:linear-gradient(135deg,#f5a623,#e8981a);
+  border-radius:11px;display:flex;align-items:center;justify-content:center;
+  font-size:20px;flex-shrink:0;box-shadow:0 4px 12px rgba(245,166,35,.3);
+}
+.sidebar-name{font-size:15px;font-weight:800;letter-spacing:-.3px}
+.sidebar-sub{font-size:9px;color:var(--text3);letter-spacing:1.2px;text-transform:uppercase;margin-top:1px}
+.sidebar-nav{flex:1;overflow-y:auto;padding:12px 10px}
+.nav-section{margin-bottom:6px}
+.nav-section-label{font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;padding:8px 8px 4px}
+.nav-link{
+  display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;
+  cursor:pointer;transition:.15s;color:var(--text2);font-size:13px;font-weight:500;
+  margin-bottom:1px;border:none;background:transparent;width:100%;text-align:left;
+  font-family:inherit;position:relative;
+}
+.nav-link:hover{background:var(--surface2);color:var(--text)}
+.nav-link.active{background:var(--accent-dim);color:var(--accent);font-weight:600}
+.nav-link.active::before{
+  content:'';position:absolute;left:0;top:4px;bottom:4px;width:3px;
+  background:var(--accent);border-radius:0 3px 3px 0;margin-left:-10px;
+}
+.nav-link-icon{
+  width:30px;height:30px;border-radius:7px;display:flex;align-items:center;
+  justify-content:center;font-size:15px;flex-shrink:0;background:var(--surface2);
+  transition:.15s;
+}
+.nav-link.active .nav-link-icon{background:rgba(245,166,35,.2)}
+.sidebar-foot{padding:12px 10px;border-top:1px solid var(--border)}
+.sidebar-station{display:flex;align-items:center;gap:8px;padding:10px;background:var(--surface2);border-radius:8px;margin-bottom:8px}
+.station-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;box-shadow:0 0 6px var(--green)}
+.station-info{flex:1;min-width:0}
+.station-name-s{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.station-code-s{font-size:10px;color:var(--text2)}
+.sidebar-switch-btn{
+  width:100%;padding:9px;background:var(--surface2);border:1px solid var(--border2);
+  border-radius:8px;color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;
+  font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;
+  transition:.15s;
+}
+.sidebar-switch-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ═══ MAIN AREA ════════════════════════════════════════ */
+.main-area{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{
+  background:rgba(9,9,14,.8);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);padding:0 24px;height:60px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:100;
+}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.topbar-page-title{font-size:18px;font-weight:700;letter-spacing:-.3px}
+.topbar-page-sub{font-size:11px;color:var(--text2);margin-top:1px}
+.topbar-right{display:flex;align-items:center;gap:14px}
+.online-pill{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--green)}
+.online-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{box-shadow:0 0 0 5px rgba(34,197,94,0)}}
+.topbar-clock{font-size:13px;font-weight:700;color:var(--text);letter-spacing:.5px;text-align:right}
+.topbar-clock-date{font-size:10px;color:var(--text2);font-weight:400;margin-top:1px}
+.user-avatar{
+  width:36px;height:36px;background:var(--accent);border-radius:10px;
+  display:flex;align-items:center;justify-content:center;font-size:15px;
+  font-weight:800;color:#000;cursor:pointer;flex-shrink:0;
+}
+.idle-bar{height:2px;background:transparent;position:relative;overflow:hidden}
+.idle-progress{height:100%;background:var(--accent);transition:width 1s linear;width:100%;opacity:.6}
+.main-content{flex:1;padding:24px;max-width:1100px;width:100%}
+.hamburger{display:none;background:transparent;border:none;cursor:pointer;color:var(--text);padding:6px}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:199}
+
+/* ═══ PAGE HEADER ══════════════════════════════════════ */
+.page-header{margin-bottom:24px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.page-title{font-size:22px;font-weight:800;letter-spacing:-.4px}
+.page-sub{font-size:12px;color:var(--text2);margin-top:3px}
+.page-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* ═══ STAT CARDS ═══════════════════════════════════════ */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.stat-card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);padding:18px 20px;position:relative;overflow:hidden}
+.stat-card-label{font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px}
+.stat-card-value{font-size:26px;font-weight:800;color:var(--text);letter-spacing:-.5px;line-height:1}
+.stat-card-meta{font-size:11px;color:var(--text3);margin-top:6px}
+.stat-card-icon{position:absolute;right:16px;top:16px;font-size:28px;opacity:.12}
+.stat-card.amber .stat-card-value{color:var(--accent)}
+.stat-card.green .stat-card-value{color:var(--green)}
+.stat-card.blue .stat-card-value{color:var(--accent2)}
+.stat-card.red .stat-card-value{color:var(--red)}
+
+/* ═══ CARDS ════════════════════════════════════════════ */
+.card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);padding:18px;margin-bottom:16px}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.card-title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.card-title-icon{font-size:14px}
+.card-actions{display:flex;gap:6px}
+.section-title{font-size:16px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+
+/* ═══ TANK CARDS ═══════════════════════════════════════ */
+.tanks-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:16px}
+.tank-card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);overflow:hidden}
+.tank-card-head{padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
+.tank-card-name{font-size:14px;font-weight:700}
+.tank-card-fuel{font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;text-transform:uppercase;letter-spacing:.5px}
+.fuel-tag-ms{background:rgba(34,197,94,.15);color:#4ade80}
+.fuel-tag-hsd{background:rgba(249,115,22,.15);color:#fb923c}
+.fuel-tag-cng{background:rgba(168,85,247,.15);color:#c084fc}
+.tank-level-badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:5px}
+.level-low{background:var(--red-dim);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+.level-med{background:rgba(245,158,11,.12);color:var(--yellow);border:1px solid rgba(245,158,11,.3)}
+.level-ok{background:var(--green-dim);color:#4ade80;border:1px solid rgba(34,197,94,.3)}
+.tank-card-body{padding:12px 16px;background:var(--surface2);border-top:1px solid var(--border)}
+.tank-volume{font-size:28px;font-weight:800;letter-spacing:-.5px;color:var(--text)}
+.tank-volume span{font-size:14px;font-weight:400;color:var(--text2);margin-left:2px}
+.tank-cap{font-size:11px;color:var(--text3);margin-top:3px}
+.tank-progress-wrap{padding:14px 16px;border-top:1px solid var(--border)}
+.tank-progress-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+.tank-pct-label{font-size:12px;font-weight:700;color:var(--text2)}
+.progress-track{height:7px;background:var(--border2);border-radius:4px;overflow:hidden;flex:1;margin:0 10px}
+.progress-fill{height:100%;border-radius:4px;transition:.6s ease}
+.fill-low{background:linear-gradient(90deg,#ef4444,#dc2626)}
+.fill-med{background:linear-gradient(90deg,#f59e0b,#d97706)}
+.fill-ok{background:linear-gradient(90deg,#f5a623,#e8981a)}
+.tank-card-foot{padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:8px}
+
+/* ═══ CHARTS ═══════════════════════════════════════════ */
+.charts-row{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:16px}
+.chart-wrap{position:relative;height:190px;margin-top:8px}
+.chart-wrap-sm{position:relative;height:150px}
+.chart-wrap-md{position:relative;height:220px}
+
+/* ═══ TABLES ═══════════════════════════════════════════ */
+.data-table{width:100%;border-collapse:collapse;font-size:12px}
+.data-table th{padding:10px 12px;text-align:left;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border2);font-size:10px;text-transform:uppercase;letter-spacing:.7px}
+.data-table td{padding:11px 12px;border-bottom:1px solid var(--border);vertical-align:middle;font-size:12px}
 .data-table tr:last-child td{border-bottom:none}
-.data-table tr:hover td{background:rgba(255,255,255,.02)}
-.data-table .neg{color:var(--red);font-weight:600}
-.data-table .pos{color:var(--green);font-weight:600}
-.data-table .total-row td{background:rgba(249,115,22,.07);font-weight:700;border-top:1px solid var(--border)}
-/* REPORT TOOLBAR */
-.report-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
-.report-toolbar .form-group{margin:0;flex:1;min-width:140px}
-.report-toolbar .form-group input{padding:10px 12px}
-/* MOVEMENT TABLE */
-.movement-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:12px}
+.data-table tbody tr:hover td{background:rgba(255,255,255,.015)}
+.data-table .neg{color:var(--red);font-weight:700}
+.data-table .pos{color:var(--green);font-weight:700}
+.data-table .total-row td{background:var(--accent-dim);font-weight:700;color:var(--accent)}
+.fuel-name-ms{color:#4ade80;font-weight:600}
+.fuel-name-hsd{color:#fb923c;font-weight:600}
+.fuel-name-cng{color:#c084fc;font-weight:600}
+.fuel-name-xp95{color:#60a5fa;font-weight:600}
+
+/* ═══ BADGES ═══════════════════════════════════════════ */
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.badge-ms{background:rgba(34,197,94,.15);color:#4ade80}
+.badge-hsd{background:rgba(249,115,22,.15);color:#fb923c}
+.badge-cng{background:rgba(168,85,247,.15);color:#c084fc}
+.badge-cash{background:rgba(245,158,11,.15);color:#fcd34d}
+.badge-upi{background:rgba(139,92,246,.15);color:#c4b5fd}
+.badge-credit{background:var(--red-dim);color:#fca5a5}
+.badge-overdue{background:var(--red-dim);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+.badge-ok{background:var(--green-dim);color:#4ade80}
+.badge-active{background:var(--green-dim);color:#4ade80}
+.badge-pending{background:rgba(245,158,11,.15);color:var(--yellow)}
+.badge-paid{background:var(--green-dim);color:#4ade80}
+.badge-draft{background:var(--accent-dim);color:var(--accent)}
+
+/* ═══ LIST ITEMS ═══════════════════════════════════════ */
+.list-item{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;transition:.15s}
+.list-item:hover{border-color:var(--border2);background:var(--surface3)}
+.list-item-left{flex:1;min-width:0}
+.list-item-title{font-size:13px;font-weight:600}
+.list-item-sub{font-size:11px;color:var(--text2);margin-top:2px}
+
+/* ═══ SALE / KEYPAD ════════════════════════════════════ */
+.fuel-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
+.fuel-btn{padding:14px 8px;border:1px solid var(--border2);border-radius:10px;background:var(--surface2);color:var(--text);cursor:pointer;text-align:center;font-weight:700;transition:.15s;font-family:inherit}
+.fuel-btn:hover{border-color:var(--accent)}
+.fuel-btn.selected{border-color:var(--accent);background:var(--accent-dim)}
+.fuel-btn .fuel-price{font-size:10px;color:var(--text2);margin-top:3px}
+.amount-display{background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:20px;text-align:center;margin-bottom:14px}
+.amount-display .rupee{font-size:38px;font-weight:800;color:var(--accent);letter-spacing:-.5px}
+.amount-display .litres{font-size:12px;color:var(--text2);margin-top:4px}
+.keypad{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:14px}
+.key{padding:16px;background:var(--surface2);border:1px solid var(--border2);border-radius:9px;font-size:18px;font-weight:700;cursor:pointer;text-align:center;transition:.1s;font-family:inherit}
+.key:active{background:var(--surface3);transform:scale(.95)}
+.key.key-del{background:var(--red-dim);color:var(--red);border-color:rgba(239,68,68,.2)}
+.pay-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:14px}
+.pay-btn{padding:11px 6px;border:1px solid var(--border2);border-radius:9px;background:var(--surface2);color:var(--text2);cursor:pointer;text-align:center;font-size:11px;font-weight:600;transition:.15s;font-family:inherit}
+.pay-btn:hover{border-color:var(--accent);color:var(--text)}
+.pay-btn.selected{border-color:var(--green);background:var(--green-dim);color:var(--green)}
+.mode-toggle{display:flex;background:var(--surface2);border-radius:8px;padding:3px;margin-bottom:12px;gap:3px}
+.mode-btn{flex:1;padding:8px;border:none;background:transparent;color:var(--text2);border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;transition:.15s;font-family:inherit}
+.mode-btn.active{background:var(--surface3);color:var(--text)}
+
+/* ═══ REPORT TOOLBAR ═══════════════════════════════════ */
+.report-toolbar{display:flex;align-items:flex-end;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.report-toolbar .form-group{margin:0;flex:1;min-width:130px}
+.report-toolbar .form-group input{padding:9px 11px}
+
+/* ═══ SUMMARY STRIP ════════════════════════════════════ */
+.summary-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+.sum-box{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:13px;text-align:center}
+.sum-val{font-size:18px;font-weight:800;color:var(--accent);letter-spacing:-.3px}
+.sum-lbl{font-size:9px;color:var(--text2);margin-top:3px;text-transform:uppercase;letter-spacing:.6px}
+
+/* ═══ MOVEMENT / RECON ═════════════════════════════════ */
+.movement-card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:14px}
 .movement-header{padding:12px 16px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-.movement-title{font-weight:700;font-size:14px}
-/* UPI RECON */
-.recon-row{display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--surface2);border-radius:10px;margin-bottom:8px}
-.recon-app{display:flex;align-items:center;gap:10px;font-weight:600}
+.movement-title{font-weight:700;font-size:13px}
+.recon-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;margin-bottom:6px}
+.recon-app{display:flex;align-items:center;gap:10px;font-weight:600;font-size:13px}
 .recon-expected{font-size:14px;font-weight:700}
 .recon-diff-pos{color:var(--green);font-weight:700}
 .recon-diff-neg{color:var(--red);font-weight:700}
-.recon-input{width:110px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;text-align:right;outline:none}
-.recon-input:focus{border-color:var(--accent2)}
-/* SUPER ADMIN */
-.sa-badge{background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700}
-.station-row{background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px}
+.recon-input{width:110px;padding:8px 10px;background:var(--surface);border:1px solid var(--border2);border-radius:7px;color:var(--text);font-size:12px;text-align:right;outline:none}
+.recon-input:focus{border-color:var(--accent)}
+
+/* ═══ SUPER ADMIN ══════════════════════════════════════ */
+.sa-badge{background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;padding:2px 10px;border-radius:5px;font-size:10px;font-weight:700}
+.station-row{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:8px}
 .station-row-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
-.plan-badge{padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700}
-.plan-trial{background:rgba(234,179,8,.2);color:#fbbf24}
-.plan-basic{background:rgba(59,130,246,.2);color:#93c5fd}
-.plan-pro{background:rgba(34,197,94,.2);color:#4ade80}
-.plan-enterprise{background:rgba(249,115,22,.2);color:#fdba74}
-/* MISC */
-.section-title{font-size:16px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
-.back-btn{background:transparent;border:none;color:var(--accent);cursor:pointer;margin-bottom:14px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:4px;font-family:inherit;padding:0}
-input,select,textarea{font-family:inherit}
-.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:40px auto;display:block}
-@keyframes spin{to{transform:rotate(360deg)}}
-.empty{text-align:center;padding:40px 20px;color:var(--muted)}
-.empty-icon{font-size:40px;margin-bottom:12px}
-.toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(100px);background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 20px;font-size:13px;font-weight:500;z-index:999;transition:.3s;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.4)}
-.toast.show{transform:translateX(-50%) translateY(0)}
-.toast.success{border-color:var(--green);color:var(--green)}
-.toast.error{border-color:var(--red);color:#fca5a5}
-.export-bar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
-.summary-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
-.sum-box{background:var(--surface2);border-radius:10px;padding:12px;text-align:center}
-.sum-val{font-size:18px;font-weight:700;color:var(--accent)}
-.sum-lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.4px}
-.info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(45,51,72,.4);font-size:13px}
+.plan-badge{padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700}
+.plan-trial{background:rgba(245,158,11,.15);color:var(--yellow)}
+.plan-basic{background:rgba(91,122,245,.15);color:#93c5fd}
+.plan-pro{background:var(--green-dim);color:#4ade80}
+.plan-enterprise{background:var(--accent-dim);color:var(--accent)}
+
+/* ═══ MISC ═════════════════════════════════════════════ */
+.back-btn{background:transparent;border:none;color:var(--accent);cursor:pointer;margin-bottom:16px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:4px;font-family:inherit;padding:0;text-transform:uppercase;letter-spacing:.5px}
+.back-btn:hover{color:var(--accent-hover)}
+.info-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
 .info-row:last-child{border:none}
-.info-label{color:var(--muted)}
+.info-label{color:var(--text2)}
 .info-value{font-weight:600}
+.export-bar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+input,select,textarea{font-family:inherit}
+.spinner{width:28px;height:28px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin:48px auto;display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty{text-align:center;padding:40px 20px;color:var(--text2)}
+.empty-icon{font-size:36px;margin-bottom:10px;opacity:.6}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--surface3);border:1px solid var(--border2);border-radius:10px;padding:11px 20px;font-size:12px;font-weight:600;z-index:9999;transition:.25s;white-space:nowrap;box-shadow:var(--shadow-lg);opacity:0}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.toast.success{border-color:rgba(34,197,94,.4);color:var(--green)}
+.toast.error{border-color:rgba(239,68,68,.4);color:#fca5a5}
+.divider{text-align:center;color:var(--text3);font-size:11px;margin:16px 0}
+/* SHIFT BANNER */
+.shift-banner{border-radius:var(--radius-lg);padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;border:1px solid}
+.shift-banner.open{background:rgba(34,197,94,.06);border-color:rgba(34,197,94,.2)}
+.shift-banner.closed{background:rgba(245,158,11,.06);border-color:rgba(245,158,11,.2)}
+.shift-banner-title{font-weight:700;font-size:13px}
+.shift-banner-sub{font-size:11px;color:var(--text2);margin-top:2px}
+
+/* ═══ RESPONSIVE ═══════════════════════════════════════ */
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-overlay.open{display:block}
+  .main-area{margin-left:0}
+  .hamburger{display:flex;align-items:center;justify-content:center}
+  .stats-row{grid-template-columns:1fr 1fr}
+  .charts-row{grid-template-columns:1fr}
+  .tanks-grid{grid-template-columns:1fr}
+  .two-col{grid-template-columns:1fr}
+  .topbar{padding:0 14px;height:54px}
+  .main-content{padding:14px;padding-bottom:20px}
+  .topbar-clock-date{display:none}
+  .topbar-clock{font-size:12px}
+  .online-pill span{display:none}
+}
+@media(max-width:480px){
+  .stats-row{grid-template-columns:1fr}
+  .pay-grid{grid-template-columns:repeat(3,1fr)}
+}
 </style>
 </head>
 <body>
 
-<!-- ═══ AUTH SCREEN ═══════════════════════════════════════════════════ -->
+<!-- ══════════════════════════════════════════════════════
+     AUTH SCREEN
+══════════════════════════════════════════════════════ -->
 <div id="authScreen">
+  <div class="auth-logo-wrap">
+    <div class="auth-app-icon">⛽</div>
+    <div class="auth-app-name">FuelBunk Pro</div>
+    <div class="auth-app-sub">Management System</div>
+  </div>
+
   <div class="auth-card">
-    <div class="auth-logo">
-      <div class="icon">⛽</div>
-      <h1>FuelBunk Pro</h1>
-      <p>Multi-Station Management Platform</p>
-    </div>
     <div id="authAlert" class="alert"></div>
-    <div class="tab-bar">
-      <button class="tab-btn active" onclick="switchAuthTab('login')">Login</button>
-      <button class="tab-btn" onclick="switchAuthTab('register')">Register</button>
-      <button class="tab-btn" onclick="switchAuthTab('super')">Super Admin</button>
+    <div class="auth-tab-row">
+      <button class="auth-tab active" onclick="switchAuthTab('login')">🔑 Admin Login</button>
+      <button class="auth-tab" onclick="switchAuthTab('employee')">👤 Employee Login</button>
     </div>
+
+    <!-- Admin / Station Login -->
     <div id="loginForm">
-      <div class="form-group"><label>Station Code</label><input id="loginStation" type="text" placeholder="e.g. DEMO01" style="text-transform:uppercase"/></div>
-      <div class="form-group"><label>Username</label><input id="loginUser" type="text" placeholder="Username" autocomplete="username"/></div>
-      <div class="form-group"><label>Password</label><input id="loginPass" type="password" placeholder="Password" autocomplete="current-password"/></div>
-      <button class="btn btn-primary" onclick="doLogin()">Login →</button>
+      <div class="auth-form-header">
+        <div class="auth-form-icon">🔑</div>
+        <div><div class="auth-form-title">Admin / Owner Login</div><div class="auth-form-sub">Full access to management dashboard</div></div>
+      </div>
+      <div class="form-group"><label>Station Code</label><input id="loginStation" type="text" placeholder="e.g. DEMO01" style="text-transform:uppercase" autocomplete="off"/></div>
+      <div class="form-group"><label>Username</label><input id="loginUser" type="text" placeholder="Enter username" autocomplete="username"/></div>
+      <div class="form-group"><label>Password</label><input id="loginPass" type="password" placeholder="Enter password" autocomplete="current-password"/></div>
+      <button class="btn btn-primary" onclick="doLogin()">🏪 Login as Admin</button>
     </div>
-    <div id="registerForm" class="hidden">
-      <div class="form-group"><label>Station Code <span style="color:var(--muted);font-size:10px">(4–10 chars)</span></label><input id="regCode" type="text" placeholder="e.g. HPCL001" style="text-transform:uppercase" maxlength="10"/></div>
-      <div class="form-group"><label>Station Name</label><input id="regName" type="text" placeholder="Sharma Filling Station"/></div>
-      <div class="form-group"><label>Owner Username</label><input id="regUser" type="text" placeholder="Min 4 characters"/></div>
-      <div class="form-group"><label>Owner Password <span style="color:var(--muted);font-size:10px">(Upper+Lower+Number+Special)</span></label><input id="regPass" type="password" placeholder="Min 8 chars"/></div>
-      <div class="form-group"><label>Full Name</label><input id="regFullName" type="text" placeholder="Owner's full name"/></div>
-      <div class="form-group"><label>Mobile</label><input id="regMobile" type="tel" placeholder="10-digit mobile"/></div>
-      <button class="btn btn-secondary" onclick="doRegister()">Register & Start Free Trial →</button>
-      <p style="text-align:center;color:var(--muted);font-size:12px;margin-top:12px">✓ 30-day free trial • No credit card needed</p>
+
+    <!-- Employee Login -->
+    <div id="employeeForm" class="hidden">
+      <div class="auth-form-header">
+        <div class="auth-form-icon" style="background:var(--accent2)">👤</div>
+        <div><div class="auth-form-title">Employee Login</div><div class="auth-form-sub">Shift operations access</div></div>
+      </div>
+      <div class="form-group"><label>Station Code</label><input id="empStation" type="text" placeholder="e.g. DEMO01" style="text-transform:uppercase"/></div>
+      <div class="form-group"><label>Username</label><input id="empUser" type="text" placeholder="Enter username"/></div>
+      <div class="form-group"><label>Password</label><input id="empPass" type="password" placeholder="Enter password"/></div>
+      <button class="btn btn-secondary" onclick="doEmpLogin()">Login as Employee</button>
     </div>
-    <div id="superForm" class="hidden">
-      <div style="background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.3);border-radius:10px;padding:12px;margin-bottom:16px;font-size:12px;color:#c4b5fd">🛡️ Super Admin — manages all stations</div>
-      <div class="form-group"><label>Username</label><input id="saUser" type="text" placeholder="superadmin"/></div>
-      <div class="form-group"><label>Password</label><input id="saPass" type="password" placeholder="Password"/></div>
-      <button class="btn btn-outline" style="border-color:#7c3aed;color:#c4b5fd" onclick="doSuperLogin()">Super Admin Login →</button>
+
+    <!-- Register & Super Admin in footer links -->
+    <div class="divider">or</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" style="flex:1;padding:10px" onclick="switchAuthTab('register')">New Station →</button>
+      <button class="btn btn-ghost btn-sm" style="flex:1;padding:10px" onclick="switchAuthTab('super')">Super Admin →</button>
+    </div>
+  </div>
+
+  <!-- Register form (shown inline) -->
+  <div id="registerPanel" class="auth-card hidden" style="margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-weight:700;font-size:14px">🏪 Register New Station</div>
+      <button onclick="switchAuthTab('login')" style="background:transparent;border:none;color:var(--text2);cursor:pointer;font-size:18px">✕</button>
+    </div>
+    <div class="form-group"><label>Station Code <span style="color:var(--text3);font-size:9px">(4–10 chars)</span></label><input id="regCode" type="text" placeholder="e.g. HPCL001" style="text-transform:uppercase" maxlength="10"/></div>
+    <div class="form-group"><label>Station Name</label><input id="regName" type="text" placeholder="Sharma Filling Station"/></div>
+    <div class="form-group"><label>Owner Username</label><input id="regUser" type="text" placeholder="Min 4 characters"/></div>
+    <div class="form-group"><label>Password</label><input id="regPass" type="password" placeholder="Upper+Lower+Number+Special"/></div>
+    <div class="form-group"><label>Full Name</label><input id="regFullName" type="text" placeholder="Owner's full name"/></div>
+    <div class="form-group"><label>Mobile</label><input id="regMobile" type="tel" placeholder="10-digit mobile"/></div>
+    <button class="btn btn-primary" onclick="doRegister()">Register & Start Free Trial →</button>
+    <p style="text-align:center;color:var(--text3);font-size:11px;margin-top:10px">✓ 30-day free trial · No credit card needed</p>
+  </div>
+
+  <!-- Super Admin panel -->
+  <div id="superPanel" class="auth-card hidden" style="margin-top:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-weight:700;font-size:14px">🛡️ Super Admin Login</div>
+      <button onclick="switchAuthTab('login')" style="background:transparent;border:none;color:var(--text2);cursor:pointer;font-size:18px">✕</button>
+    </div>
+    <div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);border-radius:8px;padding:10px;margin-bottom:14px;font-size:11px;color:#c4b5fd">Manages all stations across the platform</div>
+    <div class="form-group"><label>Username</label><input id="saUser" type="text" placeholder="superadmin"/></div>
+    <div class="form-group"><label>Password</label><input id="saPass" type="password" placeholder="Password"/></div>
+    <button class="btn" style="background:rgba(124,58,237,.2);color:#c4b5fd;border:1px solid rgba(124,58,237,.3)" onclick="doSuperLogin()">Super Admin Login</button>
+  </div>
+
+  <div class="auth-footer" style="margin-top:16px">
+    FuelBunk Pro v4.0 © 2026 &nbsp;·&nbsp;
+    <a onclick="switchAuthTab('super')">🏪 Switch Station</a>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     MAIN APP
+══════════════════════════════════════════════════════ -->
+<div id="app">
+  <div class="app-layout">
+
+    <!-- Sidebar overlay (mobile) -->
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+    <!-- ── SIDEBAR ────────────────────────────────────── -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="sidebar-brand">
+          <div class="sidebar-icon">⛽</div>
+          <div>
+            <div class="sidebar-name">FuelBunk Pro</div>
+            <div class="sidebar-sub">Management System</div>
+          </div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section">
+          <div class="nav-section-label">Operations</div>
+          <button class="nav-link active" id="nav-dashboard" onclick="navigate('dashboard')">
+            <span class="nav-link-icon">📊</span> Dashboard
+          </button>
+          <button class="nav-link" id="nav-stock" onclick="navigate('stock')">
+            <span class="nav-link-icon">⛽</span> Tanks & Inventory
+          </button>
+          <button class="nav-link" id="nav-sale" onclick="navigate('sale')">
+            <span class="nav-link-icon">🛒</span> Sales
+          </button>
+          <button class="nav-link" id="nav-shifts" onclick="navigate('shifts')">
+            <span class="nav-link-icon">⏱️</span> Shifts
+          </button>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-label">Finance</div>
+          <button class="nav-link" id="nav-credit" onclick="navTo('credit')">
+            <span class="nav-link-icon">💳</span> Credit Mgmt
+          </button>
+          <button class="nav-link" id="nav-payroll" onclick="navTo('payroll')">
+            <span class="nav-link-icon">👷</span> Staff & Payroll
+          </button>
+          <button class="nav-link" id="nav-upi" onclick="navTo('upi')">
+            <span class="nav-link-icon">📱</span> UPI Reconciliation
+          </button>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-label">Reports</div>
+          <button class="nav-link" id="nav-reports" onclick="navTo('reports')">
+            <span class="nav-link-icon">📋</span> Reports
+          </button>
+          <button class="nav-link" id="nav-settings" onclick="navTo('settings')">
+            <span class="nav-link-icon">⚙️</span> Settings
+          </button>
+        </div>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="sidebar-station">
+          <div class="station-dot"></div>
+          <div class="station-info">
+            <div class="station-name-s" id="sidebarStationName">—</div>
+            <div class="station-code-s" id="sidebarStationCode">—</div>
+          </div>
+        </div>
+        <button class="sidebar-switch-btn" onclick="doLogout()">⏻ &nbsp;Logout</button>
+      </div>
+    </aside>
+
+    <!-- ── MAIN AREA ───────────────────────────────────── -->
+    <div class="main-area">
+      <div class="idle-bar"><div class="idle-progress" id="idleBar"></div></div>
+
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="hamburger" onclick="toggleSidebar()">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <div>
+            <div class="topbar-page-title" id="topbarTitle">Dashboard</div>
+            <div class="topbar-page-sub" id="topbarSub">FuelBunk Pro</div>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="online-pill">
+            <div class="online-dot"></div>
+            <span>Online</span>
+          </div>
+          <div>
+            <div class="topbar-clock" id="clockTime">--:--:--</div>
+            <div class="topbar-clock-date" id="clockDate">---</div>
+          </div>
+          <div class="user-avatar" id="userAvatar" title="Logged in user">D</div>
+        </div>
+      </header>
+
+      <main class="main-content" id="mainContent">
+        <div class="spinner"></div>
+      </main>
     </div>
   </div>
 </div>
 
-<!-- ═══ MAIN APP ══════════════════════════════════════════════════════ -->
-<div id="app">
-  <div class="idle-bar"><div class="idle-progress" id="idleBar"></div></div>
-  <div class="topbar">
+<!-- ══════════════════════════════════════════════════════
+     SUPER ADMIN
+══════════════════════════════════════════════════════ -->
+<div id="superApp" style="display:none;min-height:100vh">
+  <header class="topbar" style="margin-left:0;position:sticky;top:0">
     <div class="topbar-left">
-      <span style="font-size:20px">⛽</span>
-      <span class="topbar-logo">FuelBunk Pro</span>
-      <span id="stationBadge" class="station-badge"></span>
+      <div class="sidebar-icon" style="width:32px;height:32px;font-size:16px">⛽</div>
+      <div><div class="topbar-page-title">FuelBunk Pro</div></div>
+      <span class="sa-badge">SUPER ADMIN</span>
     </div>
     <div class="topbar-right">
-      <span id="userBadge" style="font-size:12px;color:var(--muted)"></span>
-      <button onclick="doLogout()" style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:20px" title="Logout">⏻</button>
+      <div class="online-pill"><div class="online-dot"></div><span>Online</span></div>
+      <div class="user-avatar" style="background:rgba(124,58,237,.8)">S</div>
+      <button onclick="doLogout()" style="background:transparent;border:none;color:var(--text2);cursor:pointer;font-size:13px;font-weight:600;font-family:inherit">Logout</button>
     </div>
-  </div>
-  <div class="main-content" id="mainContent"></div>
-  <nav class="bottom-nav">
-    <button class="nav-item active" onclick="navigate('dashboard')">
-      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Dashboard
-    </button>
-    <button class="nav-item" onclick="navigate('sale')">
-      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>Quick Sale
-    </button>
-    <button class="nav-item" onclick="navigate('shifts')">
-      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Shifts
-    </button>
-    <button class="nav-item" onclick="navigate('stock')">
-      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>Stock
-    </button>
-    <button class="nav-item" onclick="navigate('more')">
-      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>More
-    </button>
-  </nav>
-</div>
-
-<!-- ═══ SUPER ADMIN ═══════════════════════════════════════════════════ -->
-<div id="superApp" style="display:none;flex-direction:column;min-height:100vh">
-  <div class="topbar">
-    <div class="topbar-left"><span style="font-size:20px">🛡️</span><span class="topbar-logo">FuelBunk Pro</span><span class="sa-badge">SUPER ADMIN</span></div>
-    <div class="topbar-right"><button onclick="doLogout()" style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:20px">⏻</button></div>
-  </div>
-  <div style="padding:16px;max-width:900px;margin:0 auto;width:100%" id="superContent"></div>
+  </header>
+  <div style="padding:24px;max-width:1000px;margin:0 auto;width:100%" id="superContent"></div>
 </div>
 
 <div class="toast" id="toast"></div>
-
 <script>
 const API = '';
 let accessToken='', refreshToken='', currentUser=null, currentStation=null, isSuperAdmin=false;
@@ -272,12 +626,31 @@ let currentFuel='MS', currentPayMode='cash', entryMode='amount', entryValue='';
 let shiftId=null, tanks=[], customers=[];
 let activeCharts = {};
 
-// ── Chart cleanup helper ──────────────────────────────────────────────────
+function payIcon(m){return {cash:'💵',phonepe:'📱',gpay:'🟢',paytm:'🔵',card:'💳',credit:'📋',neft:'🏦'}[m]||'💳';}
+function showToast(msg,type='success'){const t=document.getElementById('toast');t.textContent=msg;t.className=`toast ${type} show`;setTimeout(()=>t.classList.remove('show'),3000);}
+
+// ── Chart cleanup helper ───────────────────────────────────────────────────
 function destroyChart(id) {
   if (activeCharts[id]) { try { activeCharts[id].destroy(); } catch(e){} delete activeCharts[id]; }
   const el = document.getElementById(id);
   if (el) { const p = el.parentNode; const nc = document.createElement('canvas'); nc.id = id; p.replaceChild(nc, el); }
 }
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+function startClock(){
+  function tick(){
+    const now=new Date();
+    const timeStr=now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
+    const dateStr=now.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'});
+    const ct=document.getElementById('clockTime'); if(ct) ct.textContent=timeStr;
+    const cd=document.getElementById('clockDate'); if(cd) cd.textContent=dateStr;
+  }
+  tick(); setInterval(tick,1000);
+}
+
+// ── Sidebar helpers ────────────────────────────────────────────────────────
+function toggleSidebar(){document.getElementById('sidebar').classList.toggle('open');document.getElementById('sidebarOverlay').classList.toggle('open');}
+function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sidebarOverlay').classList.remove('open');}
 
 // ── Init ──────────────────────────────────────────────────────────────────
 window.onload = async () => {
@@ -299,15 +672,36 @@ async function apiFetch(path, opts={}) {
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 function switchAuthTab(tab) {
-  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',['login','register','super'][i]===tab));
-  ['loginForm','registerForm','superForm'].forEach((id,i)=>document.getElementById(id).classList.toggle('hidden',['login','register','super'][i]!==tab));
+  document.querySelectorAll('.auth-tab').forEach(b=>b.classList.remove('active'));
+  const tabMap={'login':0,'employee':1};
+  if(tabMap[tab]!==undefined) document.querySelectorAll('.auth-tab')[tabMap[tab]]?.classList.add('active');
+  document.getElementById('loginForm').classList.toggle('hidden',tab!=='login');
+  document.getElementById('employeeForm').classList.toggle('hidden',tab!=='employee');
+  document.getElementById('registerPanel').classList.toggle('hidden',tab!=='register');
+  document.getElementById('superPanel').classList.toggle('hidden',tab!=='super');
   document.getElementById('authAlert').className='alert';
+  // scroll into view if needed
+  if(tab==='register'||tab==='super'){document.getElementById(tab==='register'?'registerPanel':'superPanel').scrollIntoView({behavior:'smooth',block:'nearest'});}
 }
 function showAuthAlert(msg,type='error'){const el=document.getElementById('authAlert');el.textContent=msg;el.className=`alert ${type}`;}
 async function doLogin(){
   const station=document.getElementById('loginStation').value.trim().toUpperCase();
   const username=document.getElementById('loginUser').value.trim();
   const password=document.getElementById('loginPass').value;
+  if(!station||!username||!password) return showAuthAlert('Please fill all fields.');
+  try{
+    const res=await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stationCode:station,username,password})});
+    const data=await res.json();
+    if(!res.ok) return showAuthAlert(data.error||'Login failed.');
+    accessToken=data.accessToken; refreshToken=data.refreshToken; currentUser=data.user; currentStation=data.station; isSuperAdmin=false;
+    sessionStorage.setItem('access_token',accessToken); sessionStorage.setItem('refresh_token',refreshToken); sessionStorage.setItem('is_super_admin','false');
+    showApp();
+  }catch(e){showAuthAlert('Connection error.');}
+}
+async function doEmpLogin(){
+  const station=document.getElementById('empStation').value.trim().toUpperCase();
+  const username=document.getElementById('empUser').value.trim();
+  const password=document.getElementById('empPass').value;
   if(!station||!username||!password) return showAuthAlert('Please fill all fields.');
   try{
     const res=await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stationCode:station,username,password})});
@@ -360,97 +754,199 @@ function doLogout(){
 // ── App Init ──────────────────────────────────────────────────────────────
 function showApp(){
   document.getElementById('authScreen').style.display='none';
-  document.getElementById('app').style.display='flex';
+  document.getElementById('app').style.display='block';
   document.getElementById('superApp').style.display='none';
-  document.getElementById('stationBadge').textContent=currentStation?.code||'';
-  document.getElementById('userBadge').textContent=`${currentUser?.role?.toUpperCase()} · ${currentUser?.username}`;
+  // Populate sidebar station info
+  const sn=currentStation?.name||currentStation?.station_name||'Station';
+  const sc=currentStation?.code||currentStation?.station_code||'';
+  const ssn=document.getElementById('sidebarStationName'); if(ssn) ssn.textContent=sn;
+  const ssc=document.getElementById('sidebarStationCode'); if(ssc) ssc.textContent=sc;
+  // User avatar
+  const av=document.getElementById('userAvatar'); if(av) av.textContent=(currentUser?.fullName||currentUser?.username||'U')[0].toUpperCase();
+  // Topbar sub
+  const ts=document.getElementById('topbarSub'); if(ts) ts.textContent=`${sn}${sc?' · '+sc:''}`;
   idleTimeout=(currentStation?.idleTimeout||15)*60;
-  startIdleTimer(); navigate('dashboard');
+  startIdleTimer(); startClock(); navigate('dashboard');
 }
 function showSuperAdmin(){
   document.getElementById('authScreen').style.display='none';
   document.getElementById('app').style.display='none';
-  document.getElementById('superApp').style.display='flex';
+  document.getElementById('superApp').style.display='block';
+  startClock();
   renderSuperDashboard();
 }
 function startIdleTimer(){
   idleRemaining=idleTimeout; clearInterval(idleTimer);
-  idleTimer=setInterval(()=>{idleRemaining--;document.getElementById('idleBar').style.width=(idleRemaining/idleTimeout*100)+'%';if(idleRemaining<=0){showToast('Session expired.','error');doLogout();}},1000);
+  idleTimer=setInterval(()=>{idleRemaining--;const bar=document.getElementById('idleBar');if(bar)bar.style.width=(idleRemaining/idleTimeout*100)+'%';if(idleRemaining<=0){showToast('Session expired.','error');doLogout();}},1000);
   ['touchstart','click','keydown','mousemove'].forEach(e=>document.addEventListener(e,()=>{idleRemaining=idleTimeout;},{passive:true}));
 }
+
+// ── Sidebar nav titles ─────────────────────────────────────────────────────
+const pageMeta = {
+  dashboard:{title:'Dashboard',sub:''},
+  sale:{title:'Quick Sale',sub:'Record fuel transactions'},
+  shifts:{title:'Shifts',sub:'Manage staff shifts'},
+  stock:{title:'Tanks & Inventory',sub:'Stock levels & purchases'},
+  credit:{title:'Credit Management',sub:'Customer outstanding'},
+  payroll:{title:'Staff & Payroll',sub:'Attendance, salary, advances'},
+  upi:{title:'UPI Reconciliation',sub:'PhonePe · GPay · Paytm vs bank'},
+  reports:{title:'Reports & Analytics',sub:'Daily · Stock · Performance'},
+  settings:{title:'Settings',sub:'Station config & users'},
+  audit:{title:'Audit Log',sub:'Full activity history'},
+};
 
 // ── Navigation ────────────────────────────────────────────────────────────
 function navigate(tab){
   currentTab=tab;
-  document.querySelectorAll('.nav-item').forEach((b,i)=>b.classList.toggle('active',['dashboard','sale','shifts','stock','more'][i]===tab));
+  closeSidebar();
+  // Update sidebar active state
+  document.querySelectorAll('.nav-link').forEach(b=>b.classList.remove('active'));
+  const activeNav=document.getElementById('nav-'+tab); if(activeNav) activeNav.classList.add('active');
+  // Update topbar title
+  const meta=pageMeta[tab]||{title:tab,sub:''};
+  const tt=document.getElementById('topbarTitle'); if(tt) tt.textContent=meta.title;
+  const ts=document.getElementById('topbarSub'); if(ts&&meta.sub) ts.textContent=meta.sub||(currentStation?.name||'');
   document.getElementById('mainContent').innerHTML='<div class="spinner"></div>';
   Object.keys(activeCharts).forEach(k=>{try{activeCharts[k].destroy();}catch(e){}});  activeCharts={};
-  ({dashboard:renderDashboard,sale:renderSale,shifts:renderShifts,stock:renderStock,more:renderMore}[tab]||renderDashboard)();
+  ({
+    dashboard:renderDashboard,
+    sale:renderSale,
+    shifts:renderShifts,
+    stock:renderStock,
+    credit:showCustomers,
+    payroll:showPayrollHub,
+    upi:showUPIReport,
+    reports:showDailyReport,
+    settings:showSettings,
+    audit:showAuditLog,
+  }[tab]||renderDashboard)();
 }
+function navTo(tab){navigate(tab);}
 
-// ── DASHBOARD (Sprint 1: +Charts) ─────────────────────────────────────────
 async function renderDashboard(){
   const [dashRes, trendRes] = await Promise.all([apiFetch('/api/dashboard'), apiFetch('/api/reports/trend')]);
   const {data} = await dashRes.json();
   const trend = (await trendRes.json()).data || {};
   shiftId = data.openShift?.id||null;
 
-  const shiftBanner = data.openShift
-    ? `<div class="card" style="border-color:var(--green);padding:12px 16px"><div style="display:flex;align-items:center;justify-content:space-between"><div><span style="color:var(--green);font-weight:700">🟢 Shift Open</span><div style="font-size:12px;color:var(--muted);margin-top:2px">${data.openShift.shift_name} · by ${data.openShift.opened_by_name}</div></div><button onclick="navigate('shifts')" style="background:var(--green);border:none;color:#fff;padding:7px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">Manage</button></div></div>`
-    : `<div class="card" style="border-color:var(--yellow);padding:12px 16px"><div style="display:flex;align-items:center;justify-content:space-between"><div><span style="color:var(--yellow);font-weight:700">⚠️ No Open Shift</span><div style="font-size:12px;color:var(--muted);margin-top:2px">Open a shift to record sales</div></div><button onclick="navigate('shifts')" style="background:var(--yellow);border:none;color:#000;padding:7px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">Open Shift</button></div></div>`;
-
   const c = document.getElementById('mainContent');
+
+  // Shift banner (new design)
+  const shiftBanner = data.openShift
+    ? `<div class="shift-banner open"><div><div class="shift-banner-title">🟢 Shift Open — ${data.openShift.shift_name}</div><div class="shift-banner-sub">Opened by ${data.openShift.opened_by_name} · ${new Date(data.openShift.open_time).toLocaleString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}</div></div><button onclick="navigate('shifts')" style="background:var(--green);border:none;color:#000;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap">Manage →</button></div>`
+    : `<div class="shift-banner closed"><div><div class="shift-banner-title">⚠️ No Open Shift</div><div class="shift-banner-sub">Open a shift to start recording sales</div></div><button onclick="navigate('shifts')" style="background:var(--yellow);border:none;color:#000;padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;white-space:nowrap">Open Shift</button></div>`;
+
+  // Tank cards (new design)
+  const tankCards = (data.tanks||[]).map(t=>{
+    const pct=Math.round((t.current_stock/t.capacity)*100);
+    const level=pct<25?'low':pct<50?'med':'ok';
+    const fillCls=level==='low'?'fill-low':level==='med'?'fill-med':'fill-ok';
+    const lvlBadge=level==='low'?'level-low':level==='med'?'level-med':'level-ok';
+    const fuelTag=t.fuel_type==='MS'?'fuel-tag-ms':t.fuel_type==='HSD'?'fuel-tag-hsd':'fuel-tag-cng';
+    return `<div class="tank-card">
+      <div class="tank-card-head">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="tank-card-name">${t.tank_name}</div>
+          <span class="tank-card-fuel ${fuelTag}">${t.fuel_type}</span>
+        </div>
+        <span class="tank-level-badge ${lvlBadge}">${level==='low'?'⚡ LOW':level==='med'?'⚡ MED':'OK'} ${pct}%</span>
+      </div>
+      <div class="tank-card-body">
+        <div class="tank-volume">${t.current_stock.toFixed(0)}<span>L</span></div>
+        <div class="tank-cap">Tank capacity: ${t.capacity.toLocaleString('en-IN')} L &nbsp;·&nbsp; Empty: ${(t.capacity-t.current_stock).toFixed(0)} L</div>
+      </div>
+      <div class="tank-progress-wrap">
+        <div class="tank-progress-row">
+          <div class="progress-track"><div class="progress-fill ${fillCls}" style="width:${Math.max(2,pct)}%"></div></div>
+          <div class="tank-pct-label" style="white-space:nowrap;font-size:11px;color:var(--text2)">${pct}%</div>
+        </div>
+        ${t.current_stock<=t.min_alert?`<div style="font-size:10px;color:var(--red);margin-top:4px">⚠️ Below minimum ${t.min_alert}L</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
   c.innerHTML = `
     ${shiftBanner}
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-value">₹${fmt(data.todayRevenue)}</div><div class="stat-label">Today's Revenue</div></div>
-      <div class="stat-card"><div class="stat-value">${data.todaySales||0}</div><div class="stat-label">Today's Sales</div></div>
+    <!-- STAT CARDS -->
+    <div class="stats-row" style="margin-top:16px">
+      <div class="stat-card amber"><div class="stat-card-label">Today's Revenue</div><div class="stat-card-value">₹${fmt(data.todayRevenue)}</div><div class="stat-card-meta">all pumps today</div><div class="stat-card-icon">💰</div></div>
+      <div class="stat-card"><div class="stat-card-label">Litres Sold Today</div><div class="stat-card-value">${(data.todayLitres||0).toFixed(1)} L</div><div class="stat-card-meta">all fuel types</div><div class="stat-card-icon">⛽</div></div>
+      <div class="stat-card green"><div class="stat-card-label">Cash in Hand</div><div class="stat-card-value">₹${fmt(data.cashToday||0)}</div><div class="stat-card-meta">cash sales today</div><div class="stat-card-icon">💵</div></div>
+      <div class="stat-card red"><div class="stat-card-label">Credit Pending</div><div class="stat-card-value">₹${fmt(data.totalCredit||0)}</div><div class="stat-card-meta">${data.creditAccounts||0} accounts</div><div class="stat-card-icon">📋</div></div>
     </div>
-    <!-- Revenue Chart -->
-    <div class="card">
-      <div class="card-title">7-Day Revenue</div>
-      <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
-    </div>
-    <!-- Fuel Split + Payment Split -->
-    <div class="chart-grid">
-      <div class="card" style="margin:0"><div class="card-title">Fuel Split</div><div class="chart-wrap-sm"><canvas id="fuelChart"></canvas></div></div>
-      <div class="card" style="margin:0"><div class="card-title">Payment Mix</div><div class="chart-wrap-sm"><canvas id="payChart"></canvas></div></div>
-    </div>
-    <div style="height:10px"></div>
-    <!-- Tank Levels -->
-    <div class="card">
-      <div class="card-title">Tank Levels</div>
-      ${(data.tanks||[]).map(t=>{
-        const pct=Math.round((t.current_stock/t.capacity)*100);
-        const cls=t.fuel_type==='MS'?'fuel-ms':t.fuel_type==='HSD'?'fuel-hsd':'fuel-cng';
-        const warn=t.current_stock<=t.min_alert;
-        return `<div class="tank-bar" style="${warn?'border:1px solid rgba(234,179,8,.3);':''}"><div class="tank-header"><span class="tank-name">${warn?'⚠️ ':''}${t.tank_name}</span><span class="tank-pct">${t.current_stock.toFixed(0)}L / ${pct}%</span></div><div class="progress-track"><div class="progress-fill ${cls}" style="width:${Math.max(2,pct)}%"></div></div>${warn?`<div style="font-size:11px;color:var(--yellow);margin-top:4px">Low stock — below minimum ${t.min_alert}L</div>`:''}</div>`;
-      }).join('')}
-    </div>
-    ${data.topCredit?.length?`<div class="card"><div class="card-title">Top Outstanding Credit</div>${data.topCredit.map(c=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${c.company_name}</div></div><div style="font-weight:700;color:var(--red)">₹${fmt(c.outstanding)}</div></div>`).join('')}</div>`:''}
-    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span class="card-title" style="margin:0">Recent Sales</span></div>${(data.recentSales||[]).slice(0,6).map(s=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${s.invoice_no}</div><div class="list-item-sub">${s.fuel_type} · ${s.quantity}L · ${new Date(s.sale_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div></div><div style="text-align:right"><div style="font-weight:700">₹${fmt(s.total_amount)}</div><span class="badge badge-${s.payment_mode==='cash'?'cash':'upi'}">${s.payment_mode}</span></div></div>`).join('')||'<div class="empty"><div class="empty-icon">📊</div>No sales today</div>'}</div>`;
 
-  // ── Revenue Chart
+    <!-- CHARTS -->
+    <div class="charts-row">
+      <div class="card" style="margin:0">
+        <div class="card-header"><div class="card-title"><span class="card-title-icon">📊</span> Weekly Sales Volume (Liters)</div></div>
+        <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
+      </div>
+      <div class="card" style="margin:0">
+        <div class="card-header"><div class="card-title"><span class="card-title-icon">📈</span> Weekly Revenue</div></div>
+        <div class="chart-wrap"><canvas id="revWeekChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- TANK LEVELS -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-header">
+        <div class="card-title"><span class="card-title-icon">🛢️</span> Tank Levels</div>
+        <button onclick="navigate('stock')" style="background:transparent;border:1px solid var(--border2);color:var(--text2);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">View All →</button>
+      </div>
+      <div class="tanks-grid" style="margin-bottom:0">${tankCards||'<div class="empty"><div class="empty-icon">🛢️</div>No tanks configured</div>'}</div>
+    </div>
+
+    <!-- SALES BY PAYMENT + SHIFT STATUS -->
+    <div class="two-col" style="margin-top:16px">
+      <div class="card" style="margin:0">
+        <div class="card-header"><div class="card-title"><span class="card-title-icon">💳</span> Sales by Payment</div></div>
+        ${(data.paymentBreakdown||[]).map(p=>{
+          const total=data.todayRevenue||1;
+          const pct=Math.round((p.amount/total)*100);
+          const colors={cash:'var(--green)',upi:'var(--accent2)',credit:'var(--red)',card:'var(--yellow)',phonepe:'#7c3aed',gpay:'var(--green)',paytm:'#06b6d4'};
+          const col=colors[p.payment_mode]||'var(--accent)';
+          return `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px"><span style="font-weight:600;text-transform:capitalize">${p.payment_mode}</span><span style="color:${col};font-weight:700">₹${fmt(p.amount)} <span style="color:var(--text3)">(${pct}%)</span></span></div><div class="progress-track"><div style="height:100%;width:${Math.max(2,pct)}%;background:${col};border-radius:4px;transition:.6s"></div></div></div>`;
+        }).join('')||'<div class="empty" style="padding:20px 0">No sales today</div>'}
+      </div>
+      <div class="card" style="margin:0">
+        <div class="card-header"><div class="card-title"><span class="card-title-icon">⏱️</span> Shift Status</div></div>
+        ${data.openShift?`
+          <div style="background:var(--green-dim);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:12px;margin-bottom:10px">
+            <div style="font-weight:700;color:var(--green);font-size:13px">${data.openShift.shift_name}</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:4px">Since ${new Date(data.openShift.open_time).toLocaleString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}</div>
+          </div>
+          <div class="info-row"><span class="info-label">Sales Count</span><span class="info-value">${data.openShift.sales_count||0}</span></div>
+          <div class="info-row"><span class="info-label">Total Sales</span><span class="info-value" style="color:var(--accent)">₹${fmt(data.openShift.total_sales||0)}</span></div>
+          <div class="info-row"><span class="info-label">Cash</span><span class="info-value">₹${fmt(data.openShift.cash_collected||0)}</span></div>
+          <button onclick="navigate('shifts')" class="btn btn-primary" style="margin-top:12px;padding:10px">Manage Shift →</button>
+        `:`<div class="empty" style="padding:20px 0"><div class="empty-icon">⏰</div>No active shift<br><button onclick="navigate('shifts')" style="margin-top:10px;background:var(--accent);border:none;color:#000;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700">Open Shift</button></div>`}
+      </div>
+    </div>
+
+    <!-- RECENT SALES -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-header">
+        <div class="card-title"><span class="card-title-icon">🛒</span> Recent Sales</div>
+        <button onclick="navigate('sale')" style="background:var(--accent);border:none;color:#000;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700">+ New Sale</button>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>Invoice</th><th>Fuel</th><th>Qty</th><th>Amount</th><th>Payment</th><th>Time</th></tr></thead>
+        <tbody>${(data.recentSales||[]).slice(0,8).map(s=>`<tr><td style="font-weight:600;color:var(--text)">${s.invoice_no}</td><td class="${s.fuel_type==='MS'?'fuel-name-ms':s.fuel_type==='HSD'?'fuel-name-hsd':'fuel-name-cng'}">${s.fuel_type}</td><td>${s.quantity}L</td><td style="font-weight:700">₹${fmt(s.total_amount)}</td><td><span class="badge badge-${s.payment_mode==='cash'?'cash':'upi'}">${s.payment_mode}</span></td><td style="color:var(--text3)">${new Date(s.sale_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}</td></tr>`).join('')||`<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text2)">No sales today</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+
+  // Charts
   const days = trend.daily||[];
   const labels = days.map(d=>new Date(d.d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short',day:'numeric'}));
+  const litData = days.map(d=>d.litres||0);
   const revData = days.map(d=>d.rev||0);
+  const chartDefaults = {responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},scales:{x:{grid:{color:'rgba(255,255,255,.03)'},ticks:{color:'#6b7280',font:{size:10}}},y:{grid:{color:'rgba(255,255,255,.03)'},ticks:{color:'#6b7280',font:{size:10}}}}};
   setTimeout(()=>{
-    const ctx1 = document.getElementById('revenueChart');
-    if(ctx1){
-      activeCharts.revenueChart = new Chart(ctx1,{type:'bar',data:{labels,datasets:[{label:'Revenue',data:revData,backgroundColor:'rgba(249,115,22,.7)',borderColor:'#f97316',borderWidth:1,borderRadius:6,borderSkipped:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'₹'+ctx.parsed.y.toLocaleString('en-IN')}}},scales:{x:{grid:{color:'rgba(255,255,255,.04)'},ticks:{color:'#94a3b8',font:{size:10}}},y:{grid:{color:'rgba(255,255,255,.04)'},ticks:{color:'#94a3b8',font:{size:10},callback:v=>'₹'+v.toLocaleString('en-IN')}}}}});
-    }
-    // Fuel split donut
-    const fuelSplit = trend.fuelSplit||[];
-    const fuelCtx = document.getElementById('fuelChart');
-    if(fuelCtx&&fuelSplit.length){
-      activeCharts.fuelChart = new Chart(fuelCtx,{type:'doughnut',data:{labels:fuelSplit.map(f=>f.fuel_type),datasets:[{data:fuelSplit.map(f=>f.amount),backgroundColor:['rgba(34,197,94,.8)','rgba(59,130,246,.8)','rgba(249,115,22,.8)'],borderColor:'#1a1f2e',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#94a3b8',font:{size:10},boxWidth:10}}}}});
-    }
-    // Payment mix donut
-    const payData = trend.paymentSplit||[];
-    const payCtx = document.getElementById('payChart');
-    if(payCtx&&payData.length){
-      activeCharts.payChart = new Chart(payCtx,{type:'doughnut',data:{labels:payData.map(p=>p.payment_mode),datasets:[{data:payData.map(p=>p.amount),backgroundColor:['rgba(234,179,8,.8)','rgba(139,92,246,.8)','rgba(59,130,246,.8)','rgba(16,185,129,.8)','rgba(239,68,68,.8)'],borderColor:'#1a1f2e',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#94a3b8',font:{size:10},boxWidth:10}}}}});
-    }
+    const ctx1=document.getElementById('revenueChart');
+    if(ctx1) activeCharts.revenueChart=new Chart(ctx1,{type:'bar',data:{labels,datasets:[{label:'Litres',data:litData,backgroundColor:'rgba(245,166,35,.7)',borderColor:'#f5a623',borderWidth:0,borderRadius:5,borderSkipped:false}]},options:{...chartDefaults,plugins:{...chartDefaults.plugins,tooltip:{callbacks:{label:ctx=>ctx.parsed.y.toFixed(1)+' L'}}}}});
+    const ctx2=document.getElementById('revWeekChart');
+    if(ctx2) activeCharts.revWeekChart=new Chart(ctx2,{type:'bar',data:{labels,datasets:[{label:'Revenue',data:revData,backgroundColor:'rgba(34,197,94,.7)',borderColor:'#22c55e',borderWidth:0,borderRadius:5,borderSkipped:false}]},options:{...chartDefaults,plugins:{...chartDefaults.plugins,tooltip:{callbacks:{label:ctx=>'₹'+ctx.parsed.y.toLocaleString('en-IN')}}},scales:{...chartDefaults.scales,y:{...chartDefaults.scales.y,ticks:{...chartDefaults.scales.y.ticks,callback:v=>'₹'+Math.round(v/1000)+'k'}}}}});
   },100);
 }
 
@@ -1673,6 +2169,3 @@ async function changePlan(id,cur){const plans=['trial','basic','pro','enterprise
 function fmt(n){return (n||0).toLocaleString('en-IN',{maximumFractionDigits:2});}
 function payIcon(m){return {cash:'💵',phonepe:'📱',gpay:'🟢',paytm:'🔵',card:'💳',credit:'📋',neft:'🏦'}[m]||'💳';}
 function showToast(msg,type='success'){const t=document.getElementById('toast');t.textContent=msg;t.className=`toast ${type} show`;setTimeout(()=>t.classList.remove('show'),3000);}
-</script>
-</body>
-</html>
