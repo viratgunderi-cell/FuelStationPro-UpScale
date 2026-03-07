@@ -6,6 +6,9 @@
 <title>FuelBunk Pro</title>
 <link rel="manifest" href="/manifest.json"/>
 <meta name="theme-color" content="#1a1f2e"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 :root{--bg:#0f1117;--surface:#1a1f2e;--surface2:#232838;--border:#2d3348;--accent:#f97316;--accent2:#3b82f6;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--text:#f1f5f9;--muted:#94a3b8;--radius:12px}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -432,32 +435,126 @@ function navigate(tab) {
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────
+let _weekChart = null, _payChart = null;
 async function renderDashboard() {
   const res = await apiFetch('/api/dashboard');
   const { data } = await res.json();
   const c = document.getElementById('mainContent');
-  const shiftStatus = data.openShift
-    ? `<div class="card" style="border-color:var(--green)"><div style="display:flex;align-items:center;justify-content:space-between"><div><div style="font-weight:700;color:var(--green)">🟢 Shift Open</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${data.openShift.shift_name} • by ${data.openShift.opened_by_name}</div></div><button onclick="navigate('shifts')" style="background:var(--green);border:none;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">Manage</button></div></div>`
-    : `<div class="card" style="border-color:var(--yellow)"><div style="display:flex;align-items:center;justify-content:space-between"><div><div style="font-weight:700;color:var(--yellow)">⚠️ No Open Shift</div><div style="font-size:12px;color:var(--muted)">Open a shift to record sales</div></div><button onclick="navigate('shifts')" style="background:var(--yellow);border:none;color:#000;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">Open Shift</button></div></div>`;
   shiftId = data.openShift?.id || null;
+  const shiftStatus = data.openShift
+    ? `<div class="card" style="border-color:var(--green);margin-bottom:12px"><div style="display:flex;align-items:center;justify-content:space-between"><div><div style="font-weight:700;color:var(--green)">🟢 Shift Open</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${data.openShift.shift_name} • by ${data.openShift.opened_by_name}</div></div><button onclick="navigate('shifts')" style="background:var(--green);border:none;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">Manage</button></div></div>`
+    : `<div class="card" style="border-color:var(--yellow);margin-bottom:12px"><div style="display:flex;align-items:center;justify-content:space-between"><div><div style="font-weight:700;color:var(--yellow)">⚠️ No Open Shift</div><div style="font-size:12px;color:var(--muted)">Open a shift to record sales</div></div><button onclick="navigate('shifts')" style="background:var(--yellow);border:none;color:#000;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">Open Shift</button></div></div>`;
+
+  // Payment breakdown
+  const payments = data.topPayments || [];
+  const cashAmt = payments.find(p=>p.payment_mode==='cash')?.amount||0;
+  const upiAmt = ['phonepe','gpay','paytm','upi'].reduce((a,m)=>a+(payments.find(p=>p.payment_mode===m)?.amount||0),0);
+  const creditAmt = payments.find(p=>p.payment_mode==='credit')?.amount||0;
+  const cardAmt = payments.find(p=>p.payment_mode==='card')?.amount||0;
+
   c.innerHTML = `
     ${shiftStatus}
-    <div class="stat-grid">
-      <div class="stat-card"><div class="stat-value">₹${(data.todayRevenue||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</div><div class="stat-label">Today's Revenue</div></div>
+    <div class="stat-grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div class="stat-card"><div class="stat-value">₹${fmtINR(data.todayRevenue||0)}</div><div class="stat-label">Today's Revenue</div></div>
       <div class="stat-card"><div class="stat-value">${data.todaySales||0}</div><div class="stat-label">Today's Sales</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--yellow)">₹${fmtINR(cashAmt)}</div><div class="stat-label">Cash Today</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:#a78bfa">₹${fmtINR(upiAmt)}</div><div class="stat-label">UPI Today</div></div>
     </div>
-    <div class="card">
-      <div class="card-title">Tank Levels</div>
+
+    <!-- 7-day trend chart -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>7-Day Revenue Trend</span>
+        <button onclick="showDailyReport()" style="background:var(--accent);border:none;color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">Full Report →</button>
+      </div>
+      <canvas id="weekChart" height="130"></canvas>
+    </div>
+
+    <!-- Payment split chart -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Today's Payment Split</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <canvas id="payChart" width="110" height="110" style="flex-shrink:0"></canvas>
+        <div style="flex:1">
+          ${[['Cash','#eab308',cashAmt],['UPI','#a78bfa',upiAmt],['Credit','#ef4444',creditAmt],['Card','#3b82f6',cardAmt]].filter(x=>x[2]>0).map(([l,col,amt])=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <div style="width:10px;height:10px;border-radius:50%;background:${col}"></div>
+              <span style="font-size:12px;color:var(--muted)">${l}</span>
+            </div>
+            <span style="font-size:13px;font-weight:700">₹${fmtINR(amt)}</span>
+          </div>`).join('') || '<div style="color:var(--muted);font-size:12px">No sales yet today</div>'}
+        </div>
+      </div>
+    </div>
+
+    <!-- Tank levels -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Tank Levels</span>
+        <button onclick="navigate('stock')" style="background:transparent;border:none;color:var(--accent);font-size:11px;cursor:pointer">Manage →</button>
+      </div>
       ${(data.tanks||[]).map(t => {
-        const pct = Math.round((t.current_stock/t.capacity)*100);
+        const pct = Math.min(100,Math.round((t.current_stock/t.capacity)*100));
         const cls = t.fuel_type==='MS'?'fuel-ms':t.fuel_type==='HSD'?'fuel-hsd':'fuel-cng';
-        const warn = t.current_stock <= t.min_alert ? '⚠️ ' : '';
-        return `<div class="tank-bar"><div class="tank-header"><span class="tank-name">${warn}${t.tank_name}</span><span class="tank-pct">${t.current_stock.toFixed(0)}L / ${pct}%</span></div><div class="progress-track"><div class="progress-fill ${cls}" style="width:${pct}%"></div></div></div>`;
+        const warn = t.current_stock <= t.min_alert;
+        const col = warn?'var(--red)':pct<30?'var(--yellow)':'var(--text)';
+        return `<div class="tank-bar"><div class="tank-header"><span class="tank-name" style="color:${col}">${warn?'⚠️ ':''}${t.tank_name} <span style="font-size:10px;color:var(--muted);font-weight:400">${t.fuel_type}</span></span><span class="tank-pct">${t.current_stock.toFixed(0)}L / ${pct}%</span></div><div class="progress-track"><div class="progress-fill ${cls}" style="width:${pct}%"></div></div>${warn?`<div style="font-size:11px;color:var(--red);margin-top:4px">⚠️ Below minimum alert (${t.min_alert}L)</div>`:''}</div>`;
       }).join('')}
     </div>
-    ${data.topCredit?.length ? `<div class="card"><div class="card-title">Outstanding Credit</div>${data.topCredit.map(c=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${c.company_name}</div></div><div style="font-weight:700;color:var(--red)">₹${c.outstanding.toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>`).join('')}</div>` : ''}
-    <div class="card"><div class="card-title">Recent Sales</div>${(data.recentSales||[]).slice(0,6).map(s=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${s.invoice_no}</div><div class="list-item-sub">${s.fuel_type} · ${s.quantity}L · ${new Date(s.sale_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div></div><div style="text-align:right"><div style="font-weight:700">₹${s.total_amount.toLocaleString('en-IN',{maximumFractionDigits:0})}</div><div class="badge badge-${s.payment_mode==='cash'?'cash':'upi'}">${s.payment_mode}</div></div></div>`).join('') || '<div class="empty"><div class="empty-icon">📊</div>No sales today</div>'}</div>`;
+
+    <!-- Hourly chart placeholder loaded separately -->
+    <div class="card" id="hourlyCard" style="margin-bottom:12px">
+      <div class="card-title">Today's Hourly Sales</div>
+      <canvas id="hourlyChart" height="110"></canvas>
+    </div>
+
+    ${data.topCredit?.length ? `<div class="card" style="margin-bottom:12px"><div class="card-title" style="display:flex;justify-content:space-between"><span>Top Outstanding Credit</span><button onclick="showCustomers()" style="background:transparent;border:none;color:var(--accent);font-size:11px;cursor:pointer">View All →</button></div>${data.topCredit.map(cr=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${cr.company_name}</div></div><div style="font-weight:700;color:var(--red)">₹${fmtINR(cr.outstanding)}</div></div>`).join('')}</div>` : ''}
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title" style="display:flex;justify-content:space-between">
+        <span>Recent Sales</span>
+        <button onclick="showDailyReport()" style="background:transparent;border:none;color:var(--accent);font-size:11px;cursor:pointer">Full Report →</button>
+      </div>
+      ${(data.recentSales||[]).slice(0,8).map(s=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${s.invoice_no}</div><div class="list-item-sub">${s.fuel_type} · ${s.quantity}L · ${new Date(s.sale_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div></div><div style="text-align:right"><div style="font-weight:700">₹${fmtINR(s.total_amount)}</div><div class="badge badge-${s.payment_mode==='cash'?'cash':'upi'}">${s.payment_mode}</div></div></div>`).join('') || '<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px">📊 No sales today</div>'}
+    </div>`;
+
+  // Draw week trend chart
+  if (_weekChart) { _weekChart.destroy(); _weekChart=null; }
+  const wCtx = document.getElementById('weekChart')?.getContext('2d');
+  if (wCtx && data.weekTrend?.length) {
+    const labels = data.weekTrend.map(d=>new Date(d.d).toLocaleDateString('en-IN',{weekday:'short',day:'numeric'}));
+    const vals = data.weekTrend.map(d=>d.rev);
+    _weekChart = new Chart(wCtx, { type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:'rgba(249,115,22,0.7)', borderRadius:6, borderSkipped:false }]}, options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false},ticks:{color:'#94a3b8',font:{size:10}}}, y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#94a3b8',font:{size:10},callback:v=>'₹'+fmtINR(v)}} }, responsive:true, maintainAspectRatio:false }});
+  }
+
+  // Draw payment donut chart
+  if (_payChart) { _payChart.destroy(); _payChart=null; }
+  const pCtx = document.getElementById('payChart')?.getContext('2d');
+  const payVals = [cashAmt,upiAmt,creditAmt,cardAmt];
+  const totalPay = payVals.reduce((a,b)=>a+b,0);
+  if (pCtx) {
+    _payChart = new Chart(pCtx, { type:'doughnut', data:{ datasets:[{ data: totalPay>0?payVals:[1], backgroundColor: totalPay>0?['#eab308','#a78bfa','#ef4444','#3b82f6']:['#2d3348'], borderWidth:0, hoverOffset:4 }]}, options:{ plugins:{legend:{display:false}}, cutout:'70%', responsive:false }});
+  }
+
+  // Load hourly data
+  apiFetch(`/api/reports/daily?date=${new Date().toISOString().slice(0,10)}`).then(async r=>{
+    const d2 = (await r.json()).data;
+    const hCtx = document.getElementById('hourlyChart')?.getContext('2d');
+    if (hCtx && d2?.hourly?.length) {
+      const hrs = Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
+      const hMap = Object.fromEntries((d2.hourly||[]).map(h=>[h.hr,h.amount]));
+      const hVals = hrs.map(h=>hMap[h]||0);
+      const now = new Date().getHours();
+      new Chart(hCtx, { type:'bar', data:{ labels:hrs.map(h=>h+':00'), datasets:[{ data:hVals, backgroundColor:hrs.map((h,i)=>i===now?'rgba(249,115,22,1)':'rgba(249,115,22,0.35)'), borderRadius:4, borderSkipped:false }]}, options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false},ticks:{color:'#94a3b8',font:{size:9},maxRotation:0,callback:(_,i)=>i%4===0?hrs[i]+':00':''}}, y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#94a3b8',font:{size:9},callback:v=>'₹'+fmtINR(v)}} }, responsive:true, maintainAspectRatio:false }});
+    } else {
+      const card = document.getElementById('hourlyCard');
+      if(card) card.style.display='none';
+    }
+  }).catch(()=>{});
 }
+
+function fmtINR(n) { return Number(n||0).toLocaleString('en-IN',{maximumFractionDigits:0}); }
 
 // ── Quick Sale ─────────────────────────────────────────────────────────────
 async function renderSale() {
@@ -626,20 +723,166 @@ function renderMore() {
       {icon:'💳',title:'Credit Customers',sub:'Manage outstanding balances',fn:"showCustomers()"},
       {icon:'👷',title:'Employees',sub:'Manage staff',fn:"showEmployees()"},
       {icon:'📱',title:'UPI Report',sub:'PhonePe, GPay, Paytm breakdown',fn:"showUPIReport()"},
+      {icon:'🏆',title:'Outstanding Report',sub:'All credit dues at a glance',fn:"showOutstandingReport()"},
       {icon:'⚙️',title:'Settings',sub:'Station config & users',fn:"showSettings()"},
       {icon:'📋',title:'Audit Log',sub:'Activity history',fn:"showAuditLog()"},
     ].map(m=>`<div class="list-item" onclick="${m.fn}" style="cursor:pointer"><div style="font-size:24px;margin-right:12px">${m.icon}</div><div class="list-item-left"><div class="list-item-title">${m.title}</div><div class="list-item-sub">${m.sub}</div></div><div style="color:var(--muted)">›</div></div>`).join('')}`;
 }
 
-async function showDailyReport() {
-  const today = new Date().toISOString().slice(0,10);
+let _dailyFuelChart = null, _dailyPayChart2 = null, _dailyHourChart = null;
+async function showDailyReport(dateStr) {
+  const today = dateStr || new Date().toISOString().slice(0,10);
+  document.getElementById('mainContent').innerHTML = `
+    <button onclick="renderMore()" style="background:transparent;border:none;color:var(--accent);cursor:pointer;margin-bottom:12px;font-size:14px">← Back</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="section-title" style="margin:0">Daily Report</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="date" id="rptDate" value="${today}" onchange="showDailyReport(this.value)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:8px;font-size:12px;outline:none"/>
+        <button onclick="exportDailyPDF('${today}')" style="background:var(--accent);border:none;color:#fff;padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600">⬇ PDF</button>
+      </div>
+    </div>
+    <div id="rptContent"><div style="text-align:center;padding:40px;color:var(--muted)">Loading...</div></div>`;
+
   const res = await apiFetch(`/api/reports/daily?date=${today}`);
   const { data } = await res.json();
-  document.getElementById('mainContent').innerHTML = `
-    <button onclick="renderMore()" style="background:transparent;border:none;color:var(--accent);cursor:pointer;margin-bottom:12px">← Back</button>
-    <div class="section-title">Daily Report — ${today}</div>
-    <div class="card"><div class="card-title">Fuel-Wise</div>${(data.fuelWise||[]).map(f=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${f.fuel_type}</div><div class="list-item-sub">${f.qty?.toFixed(2)}L · ${f.txns} transactions</div></div><div style="font-weight:700">₹${f.amount?.toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>`).join('') || '<div class="empty">No data</div>'}</div>
-    <div class="card"><div class="card-title">Payment-Wise</div>${(data.paymentWise||[]).map(p=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${p.payment_mode}</div><div class="list-item-sub">${p.txns} transactions</div></div><div style="font-weight:700">₹${p.amount?.toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>`).join('') || '<div class="empty">No data</div>'}</div>`;
+
+  const totalRev = (data.fuelWise||[]).reduce((a,b)=>a+(b.amount||0),0);
+  const totalQty = (data.fuelWise||[]).reduce((a,b)=>a+(b.qty||0),0);
+  const totalTxns = (data.fuelWise||[]).reduce((a,b)=>a+(b.txns||0),0);
+
+  document.getElementById('rptContent').innerHTML = `
+    <!-- Summary boxes -->
+    <div class="stat-grid" style="grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+      <div class="stat-card"><div class="stat-value" style="font-size:18px">₹${fmtINR(totalRev)}</div><div class="stat-label">Total Revenue</div></div>
+      <div class="stat-card"><div class="stat-value" style="font-size:18px">${totalQty.toFixed(1)}L</div><div class="stat-label">Total Litres</div></div>
+      <div class="stat-card"><div class="stat-value" style="font-size:18px">${totalTxns}</div><div class="stat-label">Transactions</div></div>
+    </div>
+
+    <!-- Fuel-wise chart + table -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Fuel-Wise Breakdown</div>
+      <canvas id="dailyFuelChart" height="140" style="margin-bottom:12px"></canvas>
+      ${(data.fuelWise||[]).map(f=>`
+        <div class="list-item">
+          <div class="list-item-left">
+            <div class="list-item-title"><span class="badge badge-${f.fuel_type.toLowerCase()}" style="margin-right:6px">${f.fuel_type}</span>${f.txns} transactions</div>
+            <div class="list-item-sub">${(f.qty||0).toFixed(2)} litres dispensed</div>
+          </div>
+          <div style="text-align:right"><div style="font-weight:700;font-size:16px">₹${fmtINR(f.amount)}</div></div>
+        </div>`).join('') || '<div style="color:var(--muted);text-align:center;padding:16px">No sales on this date</div>'}
+    </div>
+
+    <!-- Payment-wise chart + table -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Payment-Wise Breakdown</div>
+      <canvas id="dailyPayChart" height="130" style="margin-bottom:12px"></canvas>
+      ${(data.paymentWise||[]).map(p=>`
+        <div class="list-item">
+          <div class="list-item-left">
+            <div class="list-item-title">${{cash:'💵 Cash',phonepe:'📱 PhonePe',gpay:'🟢 Google Pay',paytm:'🔵 Paytm',card:'💳 Card',credit:'🏢 Credit',upi:'📲 UPI'}[p.payment_mode]||p.payment_mode}</div>
+            <div class="list-item-sub">${p.txns} transactions</div>
+          </div>
+          <div style="font-weight:700;font-size:15px">₹${fmtINR(p.amount)}</div>
+        </div>`).join('') || '<div style="color:var(--muted);text-align:center;padding:16px">No payment data</div>'}
+    </div>
+
+    <!-- Hourly trend -->
+    ${data.hourly?.length ? `<div class="card" style="margin-bottom:12px"><div class="card-title">Hourly Sales Trend</div><canvas id="dailyHourChart" height="120"></canvas></div>` : ''}
+
+    <!-- Shift-wise breakdown -->
+    ${data.shiftWise?.length ? `<div class="card" style="margin-bottom:12px">
+      <div class="card-title">Shift-Wise Summary</div>
+      ${data.shiftWise.map(s=>`
+        <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px">
+          <div style="font-weight:700;margin-bottom:8px;color:var(--accent)">${s.shift_name}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+            <div><span style="color:var(--muted)">Total Sales</span><div style="font-weight:700">₹${fmtINR(s.total_sales)}</div></div>
+            <div><span style="color:var(--muted)">Cash</span><div style="font-weight:700;color:var(--yellow)">₹${fmtINR(s.cash_collected)}</div></div>
+            <div><span style="color:var(--muted)">UPI</span><div style="font-weight:700;color:#a78bfa">₹${fmtINR(s.upi_collected)}</div></div>
+            <div><span style="color:var(--muted)">Credit</span><div style="font-weight:700;color:var(--red)">₹${fmtINR(s.credit_sales)}</div></div>
+            ${s.cash_variance!=null?`<div><span style="color:var(--muted)">Cash Variance</span><div style="font-weight:700;color:${s.cash_variance<0?'var(--red)':'var(--green)'}">${s.cash_variance>=0?'+':''}₹${fmtINR(Math.abs(s.cash_variance))}</div></div>`:''}
+          </div>
+        </div>`).join('')}
+    </div>` : ''}`;
+
+  // Fuel chart
+  if (_dailyFuelChart) { _dailyFuelChart.destroy(); _dailyFuelChart=null; }
+  const fc = document.getElementById('dailyFuelChart')?.getContext('2d');
+  if (fc && data.fuelWise?.length) {
+    _dailyFuelChart = new Chart(fc, { type:'bar', data:{ labels:data.fuelWise.map(f=>f.fuel_type), datasets:[{ label:'Revenue (₹)', data:data.fuelWise.map(f=>f.amount), backgroundColor:['rgba(34,197,94,0.7)','rgba(59,130,246,0.7)','rgba(249,115,22,0.7)'], borderRadius:8, borderSkipped:false }, { label:'Litres', data:data.fuelWise.map(f=>f.qty), backgroundColor:['rgba(34,197,94,0.3)','rgba(59,130,246,0.3)','rgba(249,115,22,0.3)'], borderRadius:8, borderSkipped:false, yAxisID:'y1' }]}, options:{ plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}}, scales:{ x:{grid:{display:false},ticks:{color:'#94a3b8'}}, y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#94a3b8',callback:v=>'₹'+fmtINR(v)}}, y1:{position:'right',grid:{display:false},ticks:{color:'#94a3b8',callback:v=>v+'L'}} }, responsive:true, maintainAspectRatio:false }});
+  }
+
+  // Payment pie chart
+  if (_dailyPayChart2) { _dailyPayChart2.destroy(); _dailyPayChart2=null; }
+  const pc = document.getElementById('dailyPayChart')?.getContext('2d');
+  if (pc && data.paymentWise?.length) {
+    const payColors = {cash:'#eab308',phonepe:'#a78bfa',gpay:'#22c55e',paytm:'#3b82f6',card:'#06b6d4',credit:'#ef4444',upi:'#8b5cf6'};
+    _dailyPayChart2 = new Chart(pc, { type:'bar', data:{ labels:data.paymentWise.map(p=>p.payment_mode), datasets:[{ data:data.paymentWise.map(p=>p.amount), backgroundColor:data.paymentWise.map(p=>payColors[p.payment_mode]||'#94a3b8'), borderRadius:8, borderSkipped:false }]}, options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false},ticks:{color:'#94a3b8'}}, y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#94a3b8',callback:v=>'₹'+fmtINR(v)}} }, responsive:true, maintainAspectRatio:false }});
+  }
+
+  // Hourly chart
+  if (_dailyHourChart) { _dailyHourChart.destroy(); _dailyHourChart=null; }
+  const hc = document.getElementById('dailyHourChart')?.getContext('2d');
+  if (hc && data.hourly?.length) {
+    const hrs = Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
+    const hMap = Object.fromEntries(data.hourly.map(h=>[h.hr,h.amount]));
+    _dailyHourChart = new Chart(hc, { type:'line', data:{ labels:hrs.map(h=>h+':00'), datasets:[{ data:hrs.map(h=>hMap[h]||0), borderColor:'#f97316', backgroundColor:'rgba(249,115,22,0.1)', fill:true, tension:0.4, pointRadius:3, pointBackgroundColor:'#f97316' }]}, options:{ plugins:{legend:{display:false}}, scales:{ x:{grid:{display:false},ticks:{color:'#94a3b8',font:{size:9},maxRotation:0,callback:(_,i)=>i%3===0?hrs[i]+':00':''}}, y:{grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#94a3b8',font:{size:9},callback:v=>'₹'+fmtINR(v)}} }, responsive:true, maintainAspectRatio:false }});
+  }
+}
+
+async function exportDailyPDF(dateStr) {
+  const today = dateStr || new Date().toISOString().slice(0,10);
+  showToast('Generating PDF...', 'success');
+  const res = await apiFetch(`/api/reports/daily?date=${today}`);
+  const { data } = await res.json();
+  const sRes = await apiFetch('/api/settings');
+  const station = (await sRes.json()).data;
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+  // Header
+  doc.setFillColor(249,115,22);
+  doc.rect(0,0,210,22,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(16); doc.setFont('helvetica','bold');
+  doc.text('FuelBunk Pro — Daily Sales Report', 14, 14);
+
+  doc.setFillColor(26,31,46);
+  doc.rect(0,22,210,14,'F');
+  doc.setFontSize(10); doc.setFont('helvetica','normal');
+  doc.text(`Station: ${station?.station_name||''}  |  Date: ${today}  |  GSTIN: ${station?.gstin||'N/A'}`, 14, 31);
+
+  let y = 44;
+  doc.setTextColor(30,30,30);
+
+  // Fuel wise
+  doc.setFontSize(11); doc.setFont('helvetica','bold');
+  doc.text('Fuel-Wise Summary', 14, y); y+=6;
+  doc.autoTable({ startY:y, head:[['Fuel','Transactions','Quantity (L)','Revenue (₹)']], body:(data.fuelWise||[]).map(f=>[f.fuel_type,f.txns,(f.qty||0).toFixed(2),'₹'+fmtINR(f.amount)]), foot:[['TOTAL',(data.fuelWise||[]).reduce((a,b)=>a+b.txns,0),(data.fuelWise||[]).reduce((a,b)=>a+(b.qty||0),0).toFixed(2),'₹'+fmtINR((data.fuelWise||[]).reduce((a,b)=>a+(b.amount||0),0))]], styles:{fontSize:9,cellPadding:3}, headStyles:{fillColor:[249,115,22],textColor:255,fontStyle:'bold'}, footStyles:{fillColor:[240,240,240],fontStyle:'bold'}, alternateRowStyles:{fillColor:[248,248,248]} });
+
+  y = doc.lastAutoTable.finalY + 10;
+  doc.setFont('helvetica','bold');
+  doc.text('Payment-Wise Summary', 14, y); y+=6;
+  doc.autoTable({ startY:y, head:[['Payment Mode','Transactions','Amount (₹)']], body:(data.paymentWise||[]).map(p=>[p.payment_mode.toUpperCase(),p.txns,'₹'+fmtINR(p.amount)]), foot:[['TOTAL',(data.paymentWise||[]).reduce((a,b)=>a+b.txns,0),'₹'+fmtINR((data.paymentWise||[]).reduce((a,b)=>a+(b.amount||0),0))]], styles:{fontSize:9,cellPadding:3}, headStyles:{fillColor:[59,130,246],textColor:255,fontStyle:'bold'}, footStyles:{fillColor:[240,240,240],fontStyle:'bold'}, alternateRowStyles:{fillColor:[248,248,248]} });
+
+  if (data.shiftWise?.length) {
+    y = doc.lastAutoTable.finalY + 10;
+    doc.setFont('helvetica','bold');
+    doc.text('Shift-Wise Summary', 14, y); y+=6;
+    doc.autoTable({ startY:y, head:[['Shift','Total Sales','Cash','UPI','Credit','Variance']], body:data.shiftWise.map(s=>[s.shift_name,'₹'+fmtINR(s.total_sales),'₹'+fmtINR(s.cash_collected),'₹'+fmtINR(s.upi_collected),'₹'+fmtINR(s.credit_sales),(s.cash_variance!=null?(s.cash_variance>=0?'+':'')+fmtINR(s.cash_variance):'N/A')]), styles:{fontSize:9,cellPadding:3}, headStyles:{fillColor:[34,197,94],textColor:255,fontStyle:'bold'}, alternateRowStyles:{fillColor:[248,248,248]} });
+  }
+
+  // Footer
+  const pageCount = doc.internal.getNumberOfPages();
+  for(let i=1;i<=pageCount;i++) {
+    doc.setPage(i);
+    doc.setFontSize(8); doc.setTextColor(150);
+    doc.text(`Generated by FuelBunk Pro on ${new Date().toLocaleString('en-IN')} | Page ${i} of ${pageCount}`, 14, 290);
+  }
+
+  doc.save(`DailyReport_${today}.pdf`);
+  showToast('✓ PDF downloaded!', 'success');
 }
 
 async function showCustomers() {
@@ -686,17 +929,96 @@ async function showEmployees() {
     ${emps.map(e=>`<div class="list-item"><div style="width:36px;height:36px;background:var(--accent2);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;margin-right:10px">${e.full_name[0]}</div><div class="list-item-left"><div class="list-item-title">${e.full_name}</div><div class="list-item-sub">${e.role} · ₹${(e.salary||0).toLocaleString('en-IN',{maximumFractionDigits:0})}/month</div></div></div>`).join('') || '<div class="empty">No employees</div>'}`;
 }
 
-async function showUPIReport() {
+async function showUPIReport(fromStr, toStr) {
   const today = new Date().toISOString().slice(0,10);
-  const res = await apiFetch(`/api/reports/upi?from=${today}&to=${today}`);
-  const data = (await res.json()).data || [];
+  const from = fromStr || today; const to = toStr || today;
   document.getElementById('mainContent').innerHTML = `
-    <button onclick="renderMore()" style="background:transparent;border:none;color:var(--accent);cursor:pointer;margin-bottom:12px">← Back</button>
-    <div class="section-title">UPI Report — Today</div>
-    <div class="card">
-      ${data.map(u=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${{phonepe:'📱 PhonePe',gpay:'🟢 Google Pay',paytm:'🔵 Paytm'}[u.payment_mode]||u.payment_mode}</div><div class="list-item-sub">${u.txns} transactions</div></div><div style="font-weight:700">₹${u.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>`).join('') || '<div class="empty">No UPI transactions today</div>'}
-      ${data.length?`<div class="list-item" style="border-top:1px solid var(--border);margin-top:4px;padding-top:12px"><div class="list-item-left"><div class="list-item-title" style="font-weight:800">Total UPI</div></div><div style="font-weight:800;font-size:16px">₹${data.reduce((a,b)=>a+b.amount,0).toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>`:''}
-    </div>`;
+    <button onclick="renderMore()" style="background:transparent;border:none;color:var(--accent);cursor:pointer;margin-bottom:12px;font-size:14px">← Back</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div class="section-title" style="margin:0">UPI Report</div>
+      <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+        <input type="date" id="upiFrom" value="${from}" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:8px;font-size:11px;outline:none"/>
+        <span style="color:var(--muted);font-size:11px">to</span>
+        <input type="date" id="upiTo" value="${to}" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:8px;font-size:11px;outline:none"/>
+        <button onclick="showUPIReport(document.getElementById('upiFrom').value,document.getElementById('upiTo').value)" style="background:var(--accent);border:none;color:#fff;padding:6px 10px;border-radius:8px;font-size:11px;cursor:pointer">Go</button>
+      </div>
+    </div>
+    <div id="upiContent"><div style="text-align:center;padding:40px;color:var(--muted)">Loading...</div></div>`;
+  const res = await apiFetch(`/api/reports/upi?from=${from}&to=${to}`);
+  const data = (await res.json()).data || [];
+  const total = data.reduce((a,b)=>a+(b.amount||0),0);
+  const totalTxns = data.reduce((a,b)=>a+(b.txns||0),0);
+  const icons = {phonepe:'📱',gpay:'🟢',paytm:'🔵',upi:'📲'};
+  const cols = {phonepe:'#a78bfa',gpay:'#22c55e',paytm:'#3b82f6',upi:'#8b5cf6'};
+  document.getElementById('upiContent').innerHTML = `
+    <div class="stat-grid" style="gap:10px;margin-bottom:12px">
+      <div class="stat-card"><div class="stat-value" style="color:#a78bfa">₹${fmtINR(total)}</div><div class="stat-label">Total UPI</div></div>
+      <div class="stat-card"><div class="stat-value">${totalTxns}</div><div class="stat-label">Transactions</div></div>
+    </div>
+    ${data.length ? `<div class="card" style="margin-bottom:12px">
+      <div class="card-title">App-Wise Breakdown</div>
+      <canvas id="upiChart" height="150" style="margin-bottom:12px"></canvas>
+      ${data.map(u=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${icons[u.payment_mode]||'📲'} ${u.payment_mode.toUpperCase()}</div><div class="list-item-sub">${u.txns} txns · ${total>0?Math.round((u.amount/total)*100):0}% of UPI</div></div><div style="font-weight:700;font-size:16px">₹${fmtINR(u.amount)}</div></div>`).join('')}
+      <div class="list-item" style="border-top:1px solid var(--border);margin-top:4px"><div class="list-item-left"><div class="list-item-title" style="font-weight:800">Total</div><div class="list-item-sub">${totalTxns} transactions</div></div><div style="font-weight:800;font-size:18px;color:#a78bfa">₹${fmtINR(total)}</div></div>
+    </div>` : '<div class="card"><div style="text-align:center;padding:32px;color:var(--muted)">📱 No UPI transactions in this period</div></div>'}`;
+  const uc = document.getElementById('upiChart')?.getContext('2d');
+  if (uc && data.length) new Chart(uc, { type:'doughnut', data:{ labels:data.map(u=>u.payment_mode.toUpperCase()), datasets:[{ data:data.map(u=>u.amount), backgroundColor:data.map(u=>cols[u.payment_mode]||'#94a3b8'), borderWidth:0, hoverOffset:6 }]}, options:{ plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}}, cutout:'55%', responsive:true, maintainAspectRatio:false }});
+}
+
+async function showOutstandingReport() {
+  document.getElementById('mainContent').innerHTML = `
+    <button onclick="renderMore()" style="background:transparent;border:none;color:var(--accent);cursor:pointer;margin-bottom:12px;font-size:14px">← Back</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div class="section-title" style="margin:0">Outstanding Credit</div>
+      <button onclick="exportOutstandingPDF()" style="background:var(--accent);border:none;color:#fff;padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600">⬇ PDF</button>
+    </div>
+    <div id="outContent"><div style="text-align:center;padding:40px;color:var(--muted)">Loading...</div></div>`;
+  const res = await apiFetch('/api/reports/outstanding');
+  const data = (await res.json()).data || [];
+  const total = data.reduce((a,b)=>a+(b.outstanding||0),0);
+  document.getElementById('outContent').innerHTML = `
+    <div class="stat-grid" style="gap:10px;margin-bottom:12px">
+      <div class="stat-card"><div class="stat-value" style="color:var(--red)">₹${fmtINR(total)}</div><div class="stat-label">Total Outstanding</div></div>
+      <div class="stat-card"><div class="stat-value">${data.length}</div><div class="stat-label">Customers</div></div>
+    </div>
+    ${data.length ? data.map((c,i)=>`
+      <div class="list-item" style="border-left:3px solid ${c.outstanding>c.credit_limit?'var(--red)':'var(--yellow)'}">
+        <div style="width:32px;height:32px;background:var(--surface);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;margin-right:10px;color:var(--accent)">${i+1}</div>
+        <div class="list-item-left">
+          <div class="list-item-title">${c.company_name}</div>
+          <div class="list-item-sub">${c.contact_name||''} ${c.mobile?'· '+c.mobile:''}</div>
+          <div style="font-size:11px;margin-top:2px">
+            <span style="color:var(--muted)">Limit: ₹${fmtINR(c.credit_limit)}</span>
+            ${c.outstanding>c.credit_limit?'<span style="color:var(--red);margin-left:6px;font-weight:700">⚠️ OVER LIMIT</span>':''}
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;font-size:16px;color:var(--red)">₹${fmtINR(c.outstanding)}</div>
+          <div style="font-size:11px;color:var(--muted)">${Math.round((c.outstanding/c.credit_limit)*100)}% used</div>
+        </div>
+      </div>`).join('') : '<div class="card"><div style="text-align:center;padding:32px;color:var(--green)">✅ No outstanding dues</div></div>'}`;
+}
+
+async function exportOutstandingPDF() {
+  showToast('Generating PDF...','success');
+  const res = await apiFetch('/api/reports/outstanding');
+  const data = (await res.json()).data || [];
+  const sRes = await apiFetch('/api/settings');
+  const station = (await sRes.json()).data;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFillColor(239,68,68); doc.rect(0,0,210,22,'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(16); doc.setFont('helvetica','bold');
+  doc.text('FuelBunk Pro — Outstanding Credit Report', 14, 14);
+  doc.setFillColor(26,31,46); doc.rect(0,22,210,14,'F');
+  doc.setFontSize(10); doc.setFont('helvetica','normal');
+  doc.text(`Station: ${station?.station_name||''}  |  Generated: ${new Date().toLocaleDateString('en-IN')}`, 14, 31);
+  doc.setTextColor(30,30,30);
+  doc.autoTable({ startY:44, head:[['#','Company','Contact','Mobile','Credit Limit','Outstanding','Status']], body:data.map((c,i)=>[i+1,c.company_name,c.contact_name||'',c.mobile||'','₹'+fmtINR(c.credit_limit),'₹'+fmtINR(c.outstanding),c.outstanding>c.credit_limit?'OVER LIMIT':'OK']), foot:[['','','','','TOTAL','₹'+fmtINR(data.reduce((a,b)=>a+(b.outstanding||0),0)),'']], styles:{fontSize:8,cellPadding:3}, headStyles:{fillColor:[239,68,68],textColor:255,fontStyle:'bold'}, footStyles:{fillColor:[240,240,240],fontStyle:'bold'}, alternateRowStyles:{fillColor:[248,248,248]}, didParseCell:(d)=>{ if(d.section==='body'&&d.column.index===6&&d.cell.raw==='OVER LIMIT') d.cell.styles.textColor=[239,68,68]; } });
+  doc.setFontSize(8); doc.setTextColor(150);
+  doc.text(`Generated by FuelBunk Pro on ${new Date().toLocaleString('en-IN')}`, 14, 290);
+  doc.save(`Outstanding_Report_${new Date().toISOString().slice(0,10)}.pdf`);
+  showToast('✓ PDF downloaded!','success');
 }
 
 async function showSettings() {
