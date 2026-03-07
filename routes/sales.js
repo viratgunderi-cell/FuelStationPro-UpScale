@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
-let triggerLowStockCheck; try { triggerLowStockCheck = require('./notifications').triggerLowStockCheck; } catch(e) {}
+let triggerLowStockCheck;   try { triggerLowStockCheck   = require('./notifications').triggerLowStockCheck;   } catch(e) {}
+let triggerCreditSaleBill;  try { triggerCreditSaleBill  = require('./notifications').triggerCreditSaleBill;  } catch(e) {}
 const { body, query, validationResult } = require('express-validator');
 const db = require('../db/database');
 const { authenticate, authorize } = require('../middleware/auth');
@@ -83,6 +84,10 @@ router.post('/', heavyLimiter,
       await db.logAudit(sid, req.user.id, req.user.username, 'SALE', 'sales', null, null, {invoiceNo, fuelType, quantity, amount, paymentMode}, req.ip, req.get('user-agent'));
       // Sprint 4: Check low stock after sale
       if (triggerLowStockCheck) triggerLowStockCheck(sid).catch(() => {});
+      // Sprint 6: Send WhatsApp bill to credit customer
+      if (paymentMode === 'credit' && customerId && triggerCreditSaleBill) {
+        triggerCreditSaleBill(sid, { customerId, invoiceNo, fuelType, quantity, rate, amount }).catch(() => {});
+      }
       res.status(201).json({ success: true, message: 'Sale recorded.', invoiceNo, amount });
     } catch(e) { console.error('[sales/post]', e.message); res.status(500).json({ success: false, error: 'Server error.' }); }
   }

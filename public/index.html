@@ -558,6 +558,15 @@ input,select,textarea{font-family:inherit}
           <button class="nav-link" id="nav-notifications" onclick="navTo('notifications')">
             <span class="nav-link-icon">💬</span> WhatsApp Alerts <span id="notifBadge" style="display:none;background:var(--red);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px">!</span>
           </button>
+          <button class="nav-link" id="nav-vehicles" onclick="navTo('vehicles')">
+            <span class="nav-link-icon">🚗</span> Vehicle Report
+          </button>
+          <button class="nav-link" id="nav-density" onclick="navTo('density')">
+            <span class="nav-link-icon">⚗️</span> Density Analysis
+          </button>
+          <button class="nav-link" id="nav-bankrecon" onclick="navTo('bankrecon')">
+            <span class="nav-link-icon">🏦</span> Bank Reconciliation
+          </button>
         </div>
       </nav>
 
@@ -811,6 +820,9 @@ const pageMeta = {
   settings:{title:'Settings',sub:'Station config & users'},
   audit:{title:'Audit Log',sub:'Full activity history'},
   notifications:{title:'WhatsApp Alerts',sub:'Notifications · Alerts · Message log'},
+  vehicles:{title:'Vehicle Report',sub:'Per-vehicle fuel consumption'},
+  density:{title:'Density Analysis',sub:'Purchase quality variance'},
+  bankrecon:{title:'Bank Reconciliation',sub:'System vs bank statement'},
 };
 
 // ── Navigation ────────────────────────────────────────────────────────────
@@ -838,6 +850,9 @@ function navigate(tab){
     settings:showSettings,
     audit:showAuditLog,
     notifications:showNotifications,
+    vehicles:showVehicleReport,
+    density:showDensityReport,
+    bankrecon:showBankRecon,
   }[tab]||renderDashboard)();
 }
 function navTo(tab){navigate(tab);}
@@ -2768,6 +2783,341 @@ async function exportCreditExcel(){
   const ws=XLSX.utils.json_to_sheet(custs.map(c=>({'Company':c.company_name,'Contact':c.contact_name||'','Mobile':c.mobile||'','Outstanding (₹)':c.outstanding,'Credit Limit (₹)':c.credit_limit,'Last Payment':c.last_payment_date?new Date(c.last_payment_date).toLocaleDateString('en-IN'):'Never','Status':c.isOverdue?`Overdue ${c.daysOverdue}d`:'OK','Billing Cycle':c.billing_cycle})));
   XLSX.utils.book_append_sheet(wb,ws,'Outstanding');
   XLSX.writeFile(wb,'FuelBunk-Credit-Outstanding.xlsx');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SPRINT 6 FEATURES
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── FEATURE 1 & 2: Per-nozzle meter readings at shift open/close ──────────
+let _nozzlesCache = null;
+async function loadNozzles() {
+  if (_nozzlesCache) return _nozzlesCache;
+  try {
+    const r = await apiFetch('/api/shifts/nozzles');
+    _nozzlesCache = (await r.json()).data || [];
+  } catch { _nozzlesCache = []; }
+  return _nozzlesCache;
+}
+
+// Override renderShifts to include nozzle reading inputs
+async function renderShifts() {
+  const [curRes, listRes, nozzleRes] = await Promise.all([
+    apiFetch('/api/shifts/current'),
+    apiFetch('/api/shifts'),
+    apiFetch('/api/shifts/nozzles'),
+  ]);
+  const cur     = (await curRes.json()).data;       window._curShift = cur || null;
+  const list    = (await listRes.json()).data || [];
+  const nozzles = (await nozzleRes.json()).data || [];
+  _nozzlesCache = nozzles;
+  shiftId = cur?.id || null;
+
+  // Build nozzle input rows for open/close
+  const meterInputs = (label, prefix, readonlyPrev = false) => {
+    if (!nozzles.length) return '';
+    return `<div style="margin:10px 0 6px;font-size:12px;font-weight:600;color:var(--text2)">${label}</div>
+      ${nozzles.map(n => `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="flex:1;font-size:13px">
+            <span class="badge badge-${(n.fuel_type||'').toLowerCase()}">${n.fuel_type}</span>
+            <span style="margin-left:6px">${n.nozzle_name}</span>
+            ${readonlyPrev ? `<span style="color:var(--text2);font-size:11px;margin-left:6px">prev: ${n.last_reading?.toFixed(1)||'—'}</span>` : ''}
+          </div>
+          <input type="number" step="0.01" min="0" id="${prefix}_nozzle_${n.id}"
+            placeholder="Meter reading"
+            style="width:130px;padding:6px 10px;border-radius:6px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:13px"
+            ${readonlyPrev && n.last_reading ? `value="${n.last_reading.toFixed(1)}"` : ''}
+          />
+        </div>`).join('')}`;
+  };
+
+  const c = document.getElementById('mainContent');
+  c.innerHTML = `
+    <div class="section-title">Current Shift</div>
+    ${cur ? `<div class="card" style="border-color:var(--green)">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Opened by ${cur.opened_by_name} · ${new Date(cur.open_time).toLocaleString('en-IN')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div class="stat-card"><div class="stat-card-value">₹${fmt(cur.total_sales)}</div><div class="stat-card-label">Total Sales</div></div>
+        <div class="stat-card"><div class="stat-card-value">₹${fmt(cur.cash_collected)}</div><div class="stat-card-label">Cash</div></div>
+        <div class="stat-card"><div class="stat-card-value">₹${fmt(cur.upi_collected)}</div><div class="stat-card-label">UPI</div></div>
+        <div class="stat-card"><div class="stat-card-value">₹${fmt(cur.credit_sales)}</div><div class="stat-card-label">Credit</div></div>
+      </div>
+      <div class="form-group" style="margin-top:12px"><label>Physical Cash in Hand (₹)</label><input type="number" id="physCash" placeholder="Enter cash counted"/></div>
+      ${meterInputs('📟 Closing Meter Readings (optional)', 'close', false)}
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-outline" style="border-color:var(--red);color:var(--red)" onclick="closeShift(${cur.id})">Close Shift</button>
+        <button class="btn btn-outline" onclick="exportShiftPDF(window._curShift)" style="flex:0.5">📄 PDF</button>
+      </div>
+    </div>` : `<div class="card"><div class="empty"><div class="empty-icon">⏰</div>No open shift</div>
+      <div class="form-group" style="margin-top:12px"><label>Shift Name</label><input id="shiftName" value="Day Shift"/></div>
+      ${meterInputs('📟 Opening Meter Readings (optional)', 'open', true)}
+      <button class="btn btn-primary" onclick="openShift()" style="margin-top:8px">Open New Shift</button></div>`}
+    <div class="section-title" style="margin-top:16px">Recent Shifts</div>
+    ${list.slice(0,10).map(s => {
+      let mismatch = '';
+      try {
+        const cr = JSON.parse(s.closing_readings||'{}');
+        const or = JSON.parse(s.opening_readings||'{}');
+        if (s._mismatchAlerts?.length) mismatch = `<span style="color:var(--red);font-size:11px">⚠️ Meter gap</span>`;
+      } catch {}
+      return `<div class="list-item"><div class="list-item-left"><div class="list-item-title">${s.shift_name} ${mismatch}</div><div class="list-item-sub">${new Date(s.open_time).toLocaleDateString('en-IN')} · ${s.opened_by_name}</div></div><div style="text-align:right"><div style="font-weight:700">₹${fmt(s.total_sales)}</div><span class="badge badge-${s.status==='open'?'ms':'cash'}">${s.status}</span></div></div>`;
+    }).join('') || '<div class="empty">No shifts yet</div>'}`;
+}
+
+async function openShift() {
+  const name = document.getElementById('shiftName')?.value || 'Day Shift';
+  const meterReadings = {};
+  (_nozzlesCache||[]).forEach(n => {
+    const v = document.getElementById(`open_nozzle_${n.id}`)?.value;
+    if (v && !isNaN(v)) meterReadings[n.id] = parseFloat(v);
+  });
+  const res = await apiFetch('/api/shifts/open', { method:'POST', body:{ shiftName:name, meterReadings } });
+  const data = await res.json(); if (!res.ok) return showToast(data.error,'error');
+  shiftId = data.shiftId; showToast('✓ Shift opened','success'); renderShifts();
+}
+
+async function closeShift(id) {
+  const cash = parseFloat(document.getElementById('physCash')?.value||0);
+  const meterReadings = {};
+  (_nozzlesCache||[]).forEach(n => {
+    const v = document.getElementById(`close_nozzle_${n.id}`)?.value;
+    if (v && !isNaN(v)) meterReadings[n.id] = parseFloat(v);
+  });
+  const res = await apiFetch(`/api/shifts/${id}/close`, { method:'PUT', body:{ cashPhysical:cash, meterReadings } });
+  const data = await res.json(); if (!res.ok) return showToast(data.error,'error');
+  if (data.mismatchAlerts?.length) {
+    const detail = data.mismatchAlerts.map(a=>`${a.nozzleName}: ${a.diff}L (${a.pct}%)`).join(', ');
+    showToast(`⚠️ Meter mismatch detected: ${detail}`, 'warning', 6000);
+  }
+  shiftId = null;
+  showToast(`✓ Shift closed. Cash variance: ₹${data.variance}`, 'success');
+  renderShifts();
+}
+
+// ── FEATURE 3: Vehicle-wise Fuel Report ──────────────────────────────────
+async function showVehicleReport(fromVal, toVal, vehicleNo='', fuelType='') {
+  const today = new Date().toISOString().slice(0,10);
+  const to   = toVal   || today;
+  const from = fromVal || new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+  const c = document.getElementById('mainContent');
+  c.innerHTML = '<div class="spinner"></div>';
+
+  let url = `/api/reports/vehicles?from=${from}&to=${to}`;
+  if (vehicleNo) url += `&vehicleNo=${encodeURIComponent(vehicleNo)}`;
+  if (fuelType)  url += `&fuelType=${fuelType}`;
+
+  const res = await apiFetch(url);
+  const { data } = await res.json();
+  const rows = data?.rows || [];
+  const sum  = data?.summary || {};
+
+  c.innerHTML = `
+    <div class="section-title">🚗 Vehicle-wise Fuel Report</div>
+    <div class="report-toolbar" style="flex-wrap:wrap;gap:8px">
+      <div class="form-group" style="flex:1;min-width:130px"><label>From</label><input type="date" id="vrFrom" value="${from}" max="${today}" onchange="showVehicleReport(this.value,document.getElementById('vrTo').value,document.getElementById('vrVno').value,document.getElementById('vrFuel').value)"/></div>
+      <div class="form-group" style="flex:1;min-width:130px"><label>To</label><input type="date" id="vrTo" value="${to}" max="${today}" onchange="showVehicleReport(document.getElementById('vrFrom').value,this.value,document.getElementById('vrVno').value,document.getElementById('vrFuel').value)"/></div>
+      <div class="form-group" style="flex:1;min-width:140px"><label>Vehicle No</label><input id="vrVno" value="${vehicleNo}" placeholder="e.g. KA01" style="text-transform:uppercase"/></div>
+      <div class="form-group" style="flex:1;min-width:100px"><label>Fuel</label>
+        <select id="vrFuel" onchange="showVehicleReport(document.getElementById('vrFrom').value,document.getElementById('vrTo').value,document.getElementById('vrVno').value,this.value)">
+          <option value="">All</option><option value="MS" ${fuelType==='MS'?'selected':''}>MS</option><option value="HSD" ${fuelType==='HSD'?'selected':''}>HSD</option>
+        </select></div>
+      <div style="align-self:flex-end;padding-bottom:2px">
+        <button class="btn-sm" style="background:var(--accent);color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:700" onclick="showVehicleReport(document.getElementById('vrFrom').value,document.getElementById('vrTo').value,document.getElementById('vrVno').value,document.getElementById('vrFuel').value)">Search</button>
+      </div>
+    </div>
+    <div class="summary-strip">
+      <div class="sum-box"><div class="sum-val">${sum.totalVehicles||0}</div><div class="sum-lbl">Vehicles</div></div>
+      <div class="sum-box"><div class="sum-val">${(sum.totalQty||0).toFixed(1)}L</div><div class="sum-lbl">Total Fuel</div></div>
+      <div class="sum-box"><div class="sum-val">₹${fmt(sum.totalAmount||0)}</div><div class="sum-lbl">Revenue</div></div>
+    </div>
+    ${rows.length ? `<div class="card" style="padding:0;overflow:hidden">
+      <table class="data-table">
+        <thead><tr><th>Vehicle No</th><th>Fuel</th><th>Txns</th><th>Litres</th><th>Amount</th><th>Last Visit</th><th>Customer</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr>
+          <td><strong>${r.vehicle_no||'—'}</strong></td>
+          <td><span class="badge badge-${(r.fuel_type||'').toLowerCase()}">${r.fuel_type}</span></td>
+          <td>${r.txns}</td>
+          <td>${(r.total_qty||0).toFixed(2)}L</td>
+          <td>₹${fmt(r.total_amount)}</td>
+          <td style="font-size:11px;color:var(--text2)">${r.last_seen||'—'}</td>
+          <td style="font-size:11px;color:var(--text2)">${r.credit_customer||'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`
+    : `<div class="card"><div class="empty"><div class="empty-icon">🚗</div>No vehicle data for selected range</div></div>`}`;
+}
+
+// ── FEATURE 4: Density Variance Analysis ─────────────────────────────────
+async function showDensityReport(fromVal, toVal) {
+  const today = new Date().toISOString().slice(0,10);
+  const to   = toVal   || today;
+  const from = fromVal || new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+  const c = document.getElementById('mainContent');
+  c.innerHTML = '<div class="spinner"></div>';
+
+  const res  = await apiFetch(`/api/reports/density-variance?from=${from}&to=${to}`);
+  const { data } = await res.json();
+  const purchases = data?.purchases || [];
+  const stats     = data?.stats     || {};
+  const ranges    = data?.ranges    || {};
+
+  const flagColor = f => f==='ok'?'var(--green)':f==='missing'?'var(--text2)':'var(--red)';
+  const flagIcon  = f => f==='ok'?'✅':f==='missing'?'❓':'🚨';
+
+  c.innerHTML = `
+    <div class="section-title">⚗️ Density Variance Analysis</div>
+    <div class="report-toolbar" style="gap:8px">
+      <div class="form-group" style="flex:1;min-width:130px"><label>From</label><input type="date" id="dvFrom" value="${from}" max="${today}" onchange="showDensityReport(this.value,document.getElementById('dvTo').value)"/></div>
+      <div class="form-group" style="flex:1;min-width:130px"><label>To</label><input type="date" id="dvTo" value="${to}" max="${today}" onchange="showDensityReport(document.getElementById('dvFrom').value,this.value)"/></div>
+    </div>
+    <div class="summary-strip">
+      <div class="sum-box"><div class="sum-val">${stats.total||0}</div><div class="sum-lbl">Purchases</div></div>
+      <div class="sum-box"><div class="sum-val" style="color:var(--green)">${stats.ok||0}</div><div class="sum-lbl">In Range</div></div>
+      <div class="sum-box"><div class="sum-val" style="color:var(--red)">${stats.anomalies||0}</div><div class="sum-lbl">Anomalies</div></div>
+      <div class="sum-box"><div class="sum-val" style="color:var(--text2)">${stats.missing||0}</div><div class="sum-lbl">Not Recorded</div></div>
+    </div>
+    <div class="card" style="background:rgba(59,130,246,.05);border-color:rgba(59,130,246,.2);margin-bottom:12px;padding:12px 16px">
+      <div style="font-size:12px;color:#93c5fd">
+        <strong>IS-1460 Standard Ranges:</strong>
+        ${Object.entries(ranges).filter(([k])=>k!=='CNG').map(([k,r])=>`<span style="margin-left:12px">${k}: <strong>${r.min}–${r.max}</strong> kg/L</span>`).join('')}
+        <br><span style="margin-top:4px;display:block">Density outside these ranges may indicate adulteration or measurement error.</span>
+      </div>
+    </div>
+    ${purchases.length ? `<div class="card" style="padding:0;overflow:hidden">
+      <table class="data-table">
+        <thead><tr><th>Date</th><th>Tank</th><th>Qty (L)</th><th>Supplier</th><th>Invoice</th><th>Density</th><th>Status</th></tr></thead>
+        <tbody>${purchases.map(p=>`<tr>
+          <td>${p.purchase_date}</td>
+          <td><span class="badge badge-${(p.fuel_type||'').toLowerCase()}">${p.fuel_type}</span> ${p.tank_name}</td>
+          <td>${(p.quantity||0).toFixed(1)}</td>
+          <td style="font-size:11px">${p.supplier_name||'—'}</td>
+          <td style="font-size:11px;color:var(--text2)">${p.invoice_no||'—'}</td>
+          <td style="font-weight:700;color:${flagColor(p.flag)}">${p.density!=null?p.density:'—'}</td>
+          <td style="color:${flagColor(p.flag)}">${flagIcon(p.flag)} ${p.flagLabel||'OK'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`
+    : `<div class="card"><div class="empty"><div class="empty-icon">⚗️</div>No purchase data for selected range</div></div>`}`;
+}
+
+// ── FEATURE 6: Bank Reconciliation ───────────────────────────────────────
+async function showBankRecon(monthVal) {
+  const today = new Date();
+  const month = monthVal || `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  const c = document.getElementById('mainContent');
+  c.innerHTML = '<div class="spinner"></div>';
+
+  const [summaryRes, entriesRes] = await Promise.all([
+    apiFetch(`/api/bank-recon/summary?month=${month}`),
+    apiFetch(`/api/bank-recon?month=${month}`),
+  ]);
+  const summary = (await summaryRes.json()).data || {};
+  const entries = (await entriesRes.json()).data || [];
+
+  // System UPI breakdown
+  const sysMap = {};
+  (summary.system?.salesByMode||[]).forEach(r => { sysMap[r.payment_mode] = r.system_amount||0; });
+  const sysPhonePe = sysMap['phonepe']||0;
+  const sysGpay    = sysMap['gpay']||0;
+  const sysPaytm   = sysMap['paytm']||0;
+  const sysUpiOther= sysMap['upi']||0;
+  const sysCard    = sysMap['card']||0;
+  const sysCash    = sysMap['cash']||0;
+
+  // Today's existing entry if any
+  const todayStr = today.toISOString().slice(0,10);
+  const todayEntry = entries.find(e=>e.recon_date===todayStr) || {};
+
+  const diffClass = v => v > 0 ? 'style="color:var(--green)"' : v < 0 ? 'style="color:var(--red)"' : '';
+  const diffSign  = v => v > 0 ? `+₹${fmt(Math.abs(v))}` : v < 0 ? `-₹${fmt(Math.abs(v))}` : '✓ Match';
+
+  c.innerHTML = `
+    <div class="section-title">🏦 Bank Reconciliation</div>
+    <div class="report-toolbar" style="gap:8px;align-items:flex-end">
+      <div class="form-group" style="flex:1;min-width:160px"><label>Month</label><input type="month" id="brMonth" value="${month}" onchange="showBankRecon(this.value)"/></div>
+    </div>
+
+    <!-- Monthly System vs Bank Summary -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">📊 Monthly Summary — ${month}</div>
+      <table class="data-table">
+        <thead><tr><th>Mode</th><th>System Total</th><th>Bank Credited</th><th>Difference</th></tr></thead>
+        <tbody>
+          <tr><td>💵 Cash Deposits</td><td>₹${fmt(sysCash)}</td><td><strong>₹${fmt(summary.bank?.cash_deposited||0)}</strong></td>
+            <td ${diffClass((summary.bank?.cash_deposited||0)-sysCash)}>${diffSign((summary.bank?.cash_deposited||0)-sysCash)}</td></tr>
+          <tr><td>📱 PhonePe</td><td>₹${fmt(sysPhonePe)}</td><td>₹${fmt(summary.bank?.upi_phonepe||0)}</td>
+            <td ${diffClass((summary.bank?.upi_phonepe||0)-sysPhonePe)}>${diffSign((summary.bank?.upi_phonepe||0)-sysPhonePe)}</td></tr>
+          <tr><td>🟢 Google Pay</td><td>₹${fmt(sysGpay)}</td><td>₹${fmt(summary.bank?.upi_gpay||0)}</td>
+            <td ${diffClass((summary.bank?.upi_gpay||0)-sysGpay)}>${diffSign((summary.bank?.upi_gpay||0)-sysGpay)}</td></tr>
+          <tr><td>🔵 Paytm</td><td>₹${fmt(sysPaytm)}</td><td>₹${fmt(summary.bank?.upi_paytm||0)}</td>
+            <td ${diffClass((summary.bank?.upi_paytm||0)-sysPaytm)}>${diffSign((summary.bank?.upi_paytm||0)-sysPaytm)}</td></tr>
+          <tr><td>💳 Card/POS</td><td>₹${fmt(sysCard)}</td><td>₹${fmt(summary.bank?.card_settled||0)}</td>
+            <td ${diffClass((summary.bank?.card_settled||0)-sysCard)}>${diffSign((summary.bank?.card_settled||0)-sysCard)}</td></tr>
+        </tbody>
+      </table>
+      <div style="font-size:12px;color:var(--text2);margin-top:8px">
+        ${summary.bank?.days_entered||0} day(s) of bank data entered for this month.
+      </div>
+    </div>
+
+    <!-- Daily Entry Form -->
+    <div class="card">
+      <div class="card-title">✏️ Enter Bank Data — <input type="date" id="brDate" value="${todayStr}" max="${todayStr}" style="background:var(--surface2);border:1px solid var(--border2);border-radius:6px;padding:4px 8px;color:var(--text);font-size:13px" onchange="loadBrEntry(this.value,${JSON.stringify(entries).replace(/</g,'\\u003c')})"/></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0">
+        <div class="form-group"><label>💵 Cash Deposited (₹)</label><input type="number" id="br_cash" placeholder="0" value="${todayEntry.cash_deposited||''}"/></div>
+        <div class="form-group"><label>📱 PhonePe Settled (₹)</label><input type="number" id="br_phonepe" placeholder="0" value="${todayEntry.upi_phonepe||''}"/></div>
+        <div class="form-group"><label>🟢 GPay Settled (₹)</label><input type="number" id="br_gpay" placeholder="0" value="${todayEntry.upi_gpay||''}"/></div>
+        <div class="form-group"><label>🔵 Paytm Settled (₹)</label><input type="number" id="br_paytm" placeholder="0" value="${todayEntry.upi_paytm||''}"/></div>
+        <div class="form-group"><label>📲 Other UPI (₹)</label><input type="number" id="br_upiother" placeholder="0" value="${todayEntry.upi_other||''}"/></div>
+        <div class="form-group"><label>💳 Card/POS Settled (₹)</label><input type="number" id="br_card" placeholder="0" value="${todayEntry.card_settled||''}"/></div>
+      </div>
+      <div class="form-group"><label>Notes</label><input id="br_notes" placeholder="e.g. Settlement T+1, batch ID" value="${todayEntry.notes||''}"/></div>
+      <button class="btn btn-primary" onclick="saveBankRecon()">💾 Save Bank Entry</button>
+    </div>
+
+    <!-- Past entries list -->
+    ${entries.length ? `<div class="section-title" style="margin-top:16px">Past Entries</div>
+    ${entries.slice(0,20).map(e=>`
+      <div class="list-item" onclick="loadBrEntry('${e.recon_date}',${JSON.stringify(entries).replace(/</g,'\\u003c')})" style="cursor:pointer">
+        <div class="list-item-left">
+          <div class="list-item-title">${e.recon_date}</div>
+          <div class="list-item-sub">Cash: ₹${fmt(e.cash_deposited)} · PhonePe: ₹${fmt(e.upi_phonepe)} · GPay: ₹${fmt(e.upi_gpay)} · Card: ₹${fmt(e.card_settled)}</div>
+        </div>
+        <span class="badge badge-ms">Saved</span>
+      </div>`).join('')}` : ''}`;
+}
+
+function loadBrEntry(date, entries) {
+  const e = (entries||[]).find(x=>x.recon_date===date) || {};
+  const set = (id,v) => { const el=document.getElementById(id); if(el) el.value=v||''; };
+  set('brDate', date);
+  set('br_cash', e.cash_deposited||'');
+  set('br_phonepe', e.upi_phonepe||'');
+  set('br_gpay', e.upi_gpay||'');
+  set('br_paytm', e.upi_paytm||'');
+  set('br_upiother', e.upi_other||'');
+  set('br_card', e.card_settled||'');
+  set('br_notes', e.notes||'');
+}
+
+async function saveBankRecon() {
+  const date = document.getElementById('brDate')?.value;
+  if (!date) return showToast('Select a date','error');
+  const body = {
+    reconDate:    date,
+    cashDeposited: parseFloat(document.getElementById('br_cash')?.value||0),
+    upiPhonepe:    parseFloat(document.getElementById('br_phonepe')?.value||0),
+    upiGpay:       parseFloat(document.getElementById('br_gpay')?.value||0),
+    upiPaytm:      parseFloat(document.getElementById('br_paytm')?.value||0),
+    upiOther:      parseFloat(document.getElementById('br_upiother')?.value||0),
+    cardSettled:   parseFloat(document.getElementById('br_card')?.value||0),
+    notes:         document.getElementById('br_notes')?.value||undefined,
+  };
+  const res = await apiFetch('/api/bank-recon', { method:'POST', body });
+  const data = await res.json();
+  if (!res.ok) return showToast(data.error,'error');
+  showToast('✓ Bank entry saved','success');
+  const m = document.getElementById('brMonth')?.value;
+  showBankRecon(m);
 }
 
 // ── SUPER ADMIN ────────────────────────────────────────────────────────────

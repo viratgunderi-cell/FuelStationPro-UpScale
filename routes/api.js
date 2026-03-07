@@ -221,8 +221,6 @@ router.get('/audit', authorize('owner','manager'), async (req, res) => {
   res.json({ success: true, data });
 });
 
-module.exports = router;
-
 // ── SPRINT 1: Enhanced Reports ────────────────────────────────────────────
 
 // Stock Movement: opening → purchases → sales → closing per tank per date range
@@ -532,3 +530,199 @@ router.get('/tanks/dip-status', async (req, res) => {
   }));
   res.json({ success: true, data: result });
 });
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT 6 ROUTES
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── FEATURE 3: Vehicle-wise Fuel Report ──────────────────────────────────
+// GET /api/reports/vehicles?from=YYYY-MM-DD&to=YYYY-MM-DD&vehicleNo=&fuelType=
+router.get('/reports/vehicles', async (req, res) => {
+  const sid = req.user.stationId;
+  const to   = req.query.to   || new Date().toISOString().slice(0,10);
+  const from = req.query.from || to;
+  const { vehicleNo, fuelType, limit = 200 } = req.query;
+
+  let sql = `
+    SELECT
+      UPPER(TRIM(s.vehicle_no)) as vehicle_no,
+      s.fuel_type,
+      COUNT(*) as txns,
+      ROUND(SUM(s.quantity),2) as total_qty,
+      ROUND(SUM(s.total_amount),2) as total_amount,
+      MIN(date(s.sale_time)) as first_seen,
+      MAX(date(s.sale_time)) as last_seen,
+      s.payment_mode,
+      c.company_name as credit_customer
+    FROM sales s
+    LEFT JOIN credit_customers c ON c.id=s.customer_id
+    WHERE s.station_id=? AND s.is_cancelled=0
+      AND date(s.sale_time) BETWEEN ? AND ?
+      AND s.vehicle_no IS NOT NULL AND TRIM(s.vehicle_no) != ''`;
+  const params = [sid, from, to];
+
+  if (vehicleNo) { sql += ` AND UPPER(TRIM(s.vehicle_no)) LIKE ?`; params.push('%'+vehicleNo.toUpperCase()+'%'); }
+  if (fuelType)  { sql += ` AND s.fuel_type=?`; params.push(fuelType); }
+
+  sql += ` GROUP BY UPPER(TRIM(s.vehicle_no)), s.fuel_type ORDER BY total_amount DESC LIMIT ?`;
+  params.push(Number(limit));
+
+  const rows = await db.all(sql, params);
+
+  // Summary
+  const totalVehicles = new Set(rows.map(r => r.vehicle_no)).size;
+  const totalQty    = rows.reduce((a,b) => a + (b.total_qty||0), 0);
+  const totalAmount = rows.reduce((a,b) => a + (b.total_amount||0), 0);
+
+  res.json({ success: true, data: { from, to, rows, summary: { totalVehicles, totalQty: +totalQty.toFixed(2), totalAmount: +totalAmount.toFixed(2) } } });
+});
+
+// ── FEATURE 4: Density Variance Analysis ─────────────────────────────────
+// GET /api/reports/density-variance?from=&to=
+// Standard IS-1460 density ranges: MS 0.720–0.775, HSD 0.820–0.870
+const DENSITY_RANGES = {
+  MS:  { min: 0.720, max: 0.775, label: 'MS (Petrol)' },
+  HSD: { min: 0.820, max: 0.870, label: 'HSD (Diesel)' },
+  CNG: { min: null,  max: null,  label: 'CNG' },
+};
+
+router.get('/reports/density-variance', async (req, res) => {
+  const sid  = req.user.stationId;
+  const to   = req.query.to   || new Date().toISOString().slice(0,10);
+  const from = req.query.from || new Date(Date.now() - 30*86400000).toISOString().slice(0,10);
+
+  const purchases = await db.all(
+    `SELECT p.id, p.invoice_no, p.purchase_date, p.quantity, p.rate, p.density,
+            t.tank_name, t.fuel_type, s.name as supplier_name
+     FROM purchases p
+     JOIN tanks t ON t.id=p.tank_id
+     LEFT JOIN suppliers s ON s.id=p.supplier_id
+     WHERE p.station_id=? AND p.purchase_date BETWEEN ? AND ?
+     ORDER BY p.purchase_date DESC`,
+    [sid, from, to]
+  );
+
+  const withFlags = purchases.map(p => {
+    const range = DENSITY_RANGES[p.fuel_type];
+    let flag = 'ok', flagLabel = '';
+    if (p.density == null) {
+      flag = 'missing'; flagLabel = 'Not recorded';
+    } else if (range?.min != null) {
+      if (p.density < range.min) { flag = 'low'; flagLabel = `Below min (${range.min})`; }
+      else if (p.density > range.max) { flag = 'high'; flagLabel = `Above max (${range.max})`; }
+    }
+    return { ...p, flag, flagLabel };
+  });
+
+  const stats = {
+    total: withFlags.length,
+    ok: withFlags.filter(r=>r.flag==='ok').length,
+    missing: withFlags.filter(r=>r.flag==='missing').length,
+    anomalies: withFlags.filter(r=>r.flag==='low'||r.flag==='high').length,
+  };
+
+  res.json({ success: true, data: { from, to, purchases: withFlags, stats, ranges: DENSITY_RANGES } });
+});
+
+// ── FEATURE 6: Bank Reconciliation ───────────────────────────────────────
+// GET  /api/bank-recon?month=YYYY-MM
+// POST /api/bank-recon         — save a reconciliation entry
+// GET  /api/bank-recon/summary?month=YYYY-MM — system totals vs saved entries
+
+router.get('/bank-recon', async (req, res) => {
+  const sid = req.user.stationId;
+  const month = req.query.month || new Date().toISOString().slice(0,7);
+  const from = month + '-01';
+  // Last day of month
+  const [y,m] = month.split('-').map(Number);
+  const to = new Date(y, m, 0).toISOString().slice(0,10);
+
+  const saved = await db.all(
+    `SELECT * FROM bank_reconciliation WHERE station_id=? AND recon_date BETWEEN ? AND ? ORDER BY recon_date DESC`,
+    [sid, from, to]
+  );
+  res.json({ success: true, data: saved });
+});
+
+router.post('/bank-recon', authorize('owner','manager'), async (req, res) => {
+  const sid = req.user.stationId;
+  const { reconDate, cashDeposited, upiPhonepe, upiGpay, upiPaytm, upiOther, cardSettled, notes } = req.body;
+  if (!reconDate) return res.status(400).json({ success: false, error: 'reconDate required.' });
+
+  // Upsert — one entry per date per station
+  await db.run(
+    `INSERT INTO bank_reconciliation
+       (station_id, recon_date, cash_deposited, upi_phonepe, upi_gpay, upi_paytm, upi_other, card_settled, notes, recorded_by)
+     VALUES (?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(station_id, recon_date) DO UPDATE SET
+       cash_deposited=excluded.cash_deposited,
+       upi_phonepe=excluded.upi_phonepe,
+       upi_gpay=excluded.upi_gpay,
+       upi_paytm=excluded.upi_paytm,
+       upi_other=excluded.upi_other,
+       card_settled=excluded.card_settled,
+       notes=excluded.notes,
+       recorded_by=excluded.recorded_by,
+       updated_at=datetime('now')`,
+    [sid, reconDate, cashDeposited||0, upiPhonepe||0, upiGpay||0, upiPaytm||0, upiOther||0, cardSettled||0, notes||null, req.user.id]
+  );
+  res.json({ success: true, message: 'Bank reconciliation saved.' });
+});
+
+router.get('/bank-recon/summary', async (req, res) => {
+  const sid = req.user.stationId;
+  const month = req.query.month || new Date().toISOString().slice(0,7);
+  const from = month + '-01';
+  const [y,m] = month.split('-').map(Number);
+  const to = new Date(y, m, 0).toISOString().slice(0,10);
+
+  const [sysSales, bankEntries] = await Promise.all([
+    // System: grouped by payment mode for the month
+    db.all(
+      `SELECT payment_mode, COUNT(*) as txns, ROUND(SUM(total_amount),2) as system_amount
+       FROM sales WHERE station_id=? AND date(sale_time) BETWEEN ? AND ? AND is_cancelled=0
+       GROUP BY payment_mode`,
+      [sid, from, to]
+    ),
+    // Bank entries: aggregate for the month
+    db.get(
+      `SELECT
+         ROUND(COALESCE(SUM(cash_deposited),0),2) as cash_deposited,
+         ROUND(COALESCE(SUM(upi_phonepe),0),2) as upi_phonepe,
+         ROUND(COALESCE(SUM(upi_gpay),0),2) as upi_gpay,
+         ROUND(COALESCE(SUM(upi_paytm),0),2) as upi_paytm,
+         ROUND(COALESCE(SUM(upi_other),0),2) as upi_other,
+         ROUND(COALESCE(SUM(card_settled),0),2) as card_settled,
+         COUNT(*) as days_entered
+       FROM bank_reconciliation WHERE station_id=? AND recon_date BETWEEN ? AND ?`,
+      [sid, from, to]
+    )
+  ]);
+
+  // Compute system totals
+  const sysMap = {};
+  sysSales.forEach(r => { sysMap[r.payment_mode] = { txns: r.txns, amount: r.system_amount }; });
+  const sysCash = (sysMap['cash']?.amount||0);
+  const sysUPI  = ['upi','phonepe','gpay','paytm'].reduce((a,k) => a+(sysMap[k]?.amount||0), 0);
+  const sysCard = (sysMap['card']?.amount||0);
+
+  const bankUPI = +(
+    (bankEntries?.upi_phonepe||0)+(bankEntries?.upi_gpay||0)+
+    (bankEntries?.upi_paytm||0)+(bankEntries?.upi_other||0)
+  ).toFixed(2);
+
+  res.json({ success: true, data: {
+    month, from, to,
+    system: { cash: sysCash, upi: sysCash===0?0:sysCash, upiBreakdown: sysMap, card: sysCard, salesByMode: sysSales },
+    bank: bankEntries || {},
+    bankUPITotal: bankUPI,
+    diff: {
+      cash: +(((bankEntries?.cash_deposited||0) - sysCash)).toFixed(2),
+      upi:  +(bankUPI - sysCash).toFixed(2),
+      card: +(((bankEntries?.card_settled||0) - sysCard)).toFixed(2),
+    }
+  }});
+});
+
+module.exports = router;

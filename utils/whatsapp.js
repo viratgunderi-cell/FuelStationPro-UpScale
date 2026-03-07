@@ -138,6 +138,20 @@ const templates = {
   lowStockMultiple(stationName, items) {
     const lines = items.map(i => `  • ${i.tankName} (${i.fuelType}): *${Math.round(i.stock).toLocaleString('en-IN')}L*`).join('\n');
     return `⚠️ *MULTIPLE LOW FUEL ALERTS*\n\n🏪 ${stationName}\n\n${lines}\n\nPlease arrange refills immediately.\n\n_— FuelBunk Pro_`;
+  },
+
+  // Sprint 6: Meter mismatch alert
+  meterMismatch(stationName, shiftName, alerts) {
+    const lines = alerts.map(a =>
+      `  • *${a.nozzleName}* (${a.fuelType})\n    Meter: ${a.meterSold}L | System: ${a.systemSold}L | Gap: *${a.diff}L (${a.pct}%)*`
+    ).join('\n');
+    return `🚨 *METER MISMATCH ALERT*\n\n🏪 ${stationName}\n📋 Shift: ${shiftName}\n\n${lines}\n\n⚠️ Please verify dispenser readings and investigate the variance.\n\n_— FuelBunk Pro_`;
+  },
+
+  // Sprint 6: WhatsApp bill for credit customer after sale
+  creditSaleBill(stationName, companyName, invoiceNo, fuelType, qty, rate, amount, outstanding, stationMobile) {
+    const fmt = v => '₹' + (v||0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    return `🧾 *FUEL CREDIT BILL*\n\n🏪 ${stationName}\n📄 Invoice: *${invoiceNo}*\n🏢 Customer: ${companyName}\n\n⛽ ${fuelType} × ${qty}L @ ${fmt(rate)}/L\n💰 Bill Amount: *${fmt(amount)}*\n📊 Total Outstanding: *${fmt(outstanding)}*\n\nKindly settle dues at earliest.\n📞 ${stationMobile||'Contact station'}\n\n_— FuelBunk Pro_`;
   }
 };
 

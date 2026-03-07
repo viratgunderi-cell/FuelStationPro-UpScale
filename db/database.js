@@ -365,6 +365,25 @@ async function initSchema() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
 
+    // ── SPRINT 6: BANK RECONCILIATION ─────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS bank_reconciliation (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      recon_date TEXT NOT NULL,
+      cash_deposited REAL NOT NULL DEFAULT 0,
+      upi_phonepe REAL NOT NULL DEFAULT 0,
+      upi_gpay REAL NOT NULL DEFAULT 0,
+      upi_paytm REAL NOT NULL DEFAULT 0,
+      upi_other REAL NOT NULL DEFAULT 0,
+      card_settled REAL NOT NULL DEFAULT 0,
+      notes TEXT,
+      recorded_by INTEGER,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(station_id, recon_date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_bank_recon_station ON bank_reconciliation(station_id, recon_date)`,
+
     // Indexes
     `CREATE INDEX IF NOT EXISTS idx_sales_station ON sales(station_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sales_time ON sales(sale_time)`,

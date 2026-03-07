@@ -345,3 +345,52 @@ module.exports.triggerDayCloseSummary = triggerDayCloseSummary;
 module.exports.triggerLowStockCheck = triggerLowStockCheck;
 module.exports.runCreditReminderCron = runCreditReminderCron;
 module.exports.logNotification = logNotification;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 6: METER MISMATCH ALERT
+// Called by shifts.js after close when meter delta ≠ system sales
+// ═══════════════════════════════════════════════════════════════════════════
+async function triggerMeterMismatch(stationId, shiftName, alerts) {
+  try {
+    const settings = await db.get('SELECT * FROM notification_settings WHERE station_id=?', [stationId]);
+    if (!settings || !settings.wa_enabled || !settings.wa_number) return;
+
+    const station = await db.get('SELECT station_name FROM stations WHERE id=?', [stationId]);
+    const msg = templates.meterMismatch(station.station_name, shiftName, alerts);
+    const result = await sendWhatsApp(settings.wa_number, msg);
+    await logNotification(stationId, 'meter_mismatch', settings.wa_number, msg, 'sent', result.provider, null, { shiftName, alerts });
+  } catch(e) {
+    console.error('[WA] Meter mismatch trigger failed:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Sprint 6: CREDIT SALE BILL — send bill to customer WhatsApp after credit sale
+// ═══════════════════════════════════════════════════════════════════════════
+async function triggerCreditSaleBill(stationId, saleData) {
+  // saleData: { customerId, invoiceNo, fuelType, quantity, rate, amount }
+  try {
+    const settings = await db.get('SELECT * FROM notification_settings WHERE station_id=?', [stationId]);
+    if (!settings || !settings.wa_enabled) return;
+
+    const [station, customer] = await Promise.all([
+      db.get('SELECT station_name, mobile FROM stations WHERE id=?', [stationId]),
+      db.get('SELECT company_name, mobile, outstanding FROM credit_customers WHERE id=? AND station_id=?',
+        [saleData.customerId, stationId])
+    ]);
+    if (!customer?.mobile) return; // no number to send to
+
+    const msg = templates.creditSaleBill(
+      station.station_name, customer.company_name, saleData.invoiceNo,
+      saleData.fuelType, saleData.quantity, saleData.rate, saleData.amount,
+      customer.outstanding, station.mobile
+    );
+    const result = await sendWhatsApp(customer.mobile, msg);
+    await logNotification(stationId, 'credit_sale_bill', customer.mobile, msg, 'sent', result.provider, null, { invoiceNo: saleData.invoiceNo });
+  } catch(e) {
+    console.error('[WA] Credit sale bill trigger failed:', e.message);
+  }
+}
+
+module.exports.triggerMeterMismatch   = triggerMeterMismatch;
+module.exports.triggerCreditSaleBill  = triggerCreditSaleBill;
