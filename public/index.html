@@ -147,6 +147,11 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .sidebar-nav{flex:1;overflow-y:auto;padding:12px 10px}
 .nav-section{margin-bottom:6px}
 .nav-section-label{font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;padding:8px 8px 4px}
+.report-tile{background:var(--card);border:1px solid var(--border2);border-radius:12px;padding:16px 12px;cursor:pointer;text-align:center;transition:border-color .2s,transform .1s}
+.report-tile:hover{border-color:var(--accent);transform:translateY(-2px)}
+.rt-icon{font-size:28px;margin-bottom:8px}
+.rt-label{font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px}
+.rt-sub{font-size:10px;color:var(--text3)}
 .nav-link{
   display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;
   cursor:pointer;transition:.15s;color:var(--text2);font-size:13px;font-weight:500;
@@ -243,6 +248,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .fuel-tag-ms{background:rgba(34,197,94,.15);color:#4ade80}
 .fuel-tag-hsd{background:rgba(249,115,22,.15);color:#fb923c}
 .fuel-tag-cng{background:rgba(168,85,247,.15);color:#c084fc}
+.fuel-tag-xp{background:rgba(234,179,8,.15);color:#fbbf24}
 .tank-level-badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:5px}
 .level-low{background:var(--red-dim);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
 .level-med{background:rgba(245,158,11,.12);color:var(--yellow);border:1px solid rgba(245,158,11,.3)}
@@ -279,6 +285,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .fuel-name-ms{color:#4ade80;font-weight:600}
 .fuel-name-hsd{color:#fb923c;font-weight:600}
 .fuel-name-cng{color:#c084fc;font-weight:600}
+.fuel-name-xp{color:#fbbf24;font-weight:600}
 .fuel-name-xp95{color:#60a5fa;font-weight:600}
 
 /* ═══ BADGES ═══════════════════════════════════════════ */
@@ -286,6 +293,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .badge-ms{background:rgba(34,197,94,.15);color:#4ade80}
 .badge-hsd{background:rgba(249,115,22,.15);color:#fb923c}
 .badge-cng{background:rgba(168,85,247,.15);color:#c084fc}
+.badge-xp{background:rgba(234,179,8,.15);color:#fbbf24}
 .badge-cash{background:rgba(245,158,11,.15);color:#fcd34d}
 .badge-upi{background:rgba(139,92,246,.15);color:#c4b5fd}
 .badge-credit{background:var(--red-dim);color:#fca5a5}
@@ -523,14 +531,14 @@ input,select,textarea{font-family:inherit}
           <button class="nav-link active" id="nav-dashboard" onclick="navigate('dashboard')">
             <span class="nav-link-icon">📊</span> Dashboard
           </button>
-          <button class="nav-link" id="nav-stock" onclick="navigate('stock')">
-            <span class="nav-link-icon">⛽</span> Tanks & Inventory
-          </button>
           <button class="nav-link" id="nav-sale" onclick="navigate('sale')">
             <span class="nav-link-icon">🛒</span> Sales
           </button>
           <button class="nav-link" id="nav-shifts" onclick="navigate('shifts')">
             <span class="nav-link-icon">⏱️</span> Shifts
+          </button>
+          <button class="nav-link" id="nav-stock" onclick="navigate('stock')">
+            <span class="nav-link-icon">⛽</span> Tanks & Inventory
           </button>
         </div>
 
@@ -539,48 +547,30 @@ input,select,textarea{font-family:inherit}
           <button class="nav-link" id="nav-credit" onclick="navTo('credit')">
             <span class="nav-link-icon">💳</span> Credit Mgmt
           </button>
+          <button class="nav-link" id="nav-purchases2" onclick="navTo('purchases2')">
+            <span class="nav-link-icon">🚛</span> Purchases & Suppliers
+          </button>
           <button class="nav-link" id="nav-payroll" onclick="navTo('payroll')">
             <span class="nav-link-icon">👷</span> Staff & Payroll
           </button>
-          <button class="nav-link" id="nav-upi" onclick="navTo('upi')">
-            <span class="nav-link-icon">📱</span> UPI Reconciliation
-          </button>
-        </div>
-
-        <div class="nav-section">
-          <div class="nav-section-label">Reports</div>
-          <button class="nav-link" id="nav-reports" onclick="navTo('reports')">
-            <span class="nav-link-icon">📋</span> Reports
-          </button>
-          <button class="nav-link" id="nav-settings" onclick="navTo('settings')">
-            <span class="nav-link-icon">⚙️</span> Settings
-          </button>
-          <button class="nav-link" id="nav-notifications" onclick="navTo('notifications')">
-            <span class="nav-link-icon">💬</span> WhatsApp Alerts <span id="notifBadge" style="display:none;background:var(--red);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px">!</span>
-          </button>
-          <button class="nav-link" id="nav-vehicles" onclick="navTo('vehicles')">
-            <span class="nav-link-icon">🚗</span> Vehicle Report
-          </button>
-          <button class="nav-link" id="nav-density" onclick="navTo('density')">
-            <span class="nav-link-icon">⚗️</span> Density Analysis
+          <button class="nav-link" id="nav-gst" onclick="navTo('gst')">
+            <span class="nav-link-icon">🧾</span> GST Module
           </button>
           <button class="nav-link" id="nav-bankrecon" onclick="navTo('bankrecon')">
             <span class="nav-link-icon">🏦</span> Bank Reconciliation
           </button>
         </div>
+
         <div class="nav-section">
-          <div class="nav-section-label">Compliance & Finance</div>
-          <button class="nav-link" id="nav-gst" onclick="navTo('gst')">
-            <span class="nav-link-icon">🧾</span> GST Module
+          <div class="nav-section-label">Reports & Tools</div>
+          <button class="nav-link" id="nav-reports" onclick="navTo('reports')">
+            <span class="nav-link-icon">📋</span> Reports
           </button>
-          <button class="nav-link" id="nav-purchases2" onclick="navTo('purchases2')">
-            <span class="nav-link-icon">🚛</span> Purchases & Suppliers
+          <button class="nav-link" id="nav-notifications" onclick="navTo('notifications')">
+            <span class="nav-link-icon">💬</span> WhatsApp Alerts <span id="notifBadge" style="display:none;background:var(--red);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px">!</span>
           </button>
-          <button class="nav-link" id="nav-reports2" onclick="navTo('reports2')">
-            <span class="nav-link-icon">📈</span> Advanced Reports
-          </button>
-          <button class="nav-link" id="nav-shiftconfig" onclick="navTo('shiftconfig')">
-            <span class="nav-link-icon">⏰</span> Shift Config
+          <button class="nav-link" id="nav-settings" onclick="navTo('settings')">
+            <span class="nav-link-icon">⚙️</span> Settings
           </button>
         </div>
       </nav>
@@ -831,8 +821,9 @@ const pageMeta = {
   credit:{title:'Credit Management',sub:'Customer outstanding'},
   payroll:{title:'Staff & Payroll',sub:'Attendance, salary, advances'},
   upi:{title:'UPI Reconciliation',sub:'PhonePe · GPay · Paytm vs bank'},
-  reports:{title:'Reports & Analytics',sub:'Daily · Stock · Performance'},
-  settings:{title:'Settings',sub:'Station config & users'},
+  reports:{title:'Reports & Analytics',sub:'Daily · Stock · Performance · Advanced'},
+  reports2:{title:'Reports & Analytics',sub:'Daily · Stock · Performance · Advanced'},
+  settings:{title:'Settings',sub:'Station config · Users · Shift config'},
   audit:{title:'Audit Log',sub:'Full activity history'},
   notifications:{title:'WhatsApp Alerts',sub:'Notifications · Alerts · Message log'},
   vehicles:{title:'Vehicle Report',sub:'Per-vehicle fuel consumption'},
@@ -840,8 +831,7 @@ const pageMeta = {
   bankrecon:{title:'Bank Reconciliation',sub:'System vs bank statement'},
   gst:{title:'GST Module',sub:'GSTR-1 · GSTR-3B · E-Invoice · Tally · P&L'},
   purchases2:{title:'Purchases & Suppliers',sub:'Fuel deliveries, GRN, Supplier ledger'},
-  reports2:{title:'Advanced Reports',sub:'Nozzle-wise · Shift comparison · Margin analysis'},
-  shiftconfig:{title:'Shift Configuration',sub:'Morning / Afternoon / Night shift setup'},
+  shiftconfig:{title:'Settings',sub:'Station config · Users · Shift config'},
 };
 
 // ── Navigation ────────────────────────────────────────────────────────────
@@ -850,7 +840,10 @@ function navigate(tab){
   closeSidebar();
   // Update sidebar active state
   document.querySelectorAll('.nav-link').forEach(b=>b.classList.remove('active'));
-  const activeNav=document.getElementById('nav-'+tab); if(activeNav) activeNav.classList.add('active');
+  // Tabs merged into parent nav items — map to correct nav highlight
+  const _navParent={upi:'reports',vehicles:'reports',density:'reports',reports2:'reports',shiftconfig:'settings',audit:'settings'};
+  const _navTab=_navParent[tab]||tab;
+  const activeNav=document.getElementById('nav-'+_navTab); if(activeNav) activeNav.classList.add('active');
   // Update topbar title
   const meta=pageMeta[tab]||{title:tab,sub:''};
   const tt=document.getElementById('topbarTitle'); if(tt) tt.textContent=meta.title;
@@ -865,9 +858,9 @@ function navigate(tab){
     credit:showCustomers,
     payroll:showPayrollHub,
     upi:showUPIReport,
-    reports:showDailyReport,
+    reports:showReportsHub_page,
     settings:showSettings,
-    audit:showAuditLog,
+    audit:()=>showSettings('audit'),
     notifications:showNotifications,
     vehicles:showVehicleReport,
     density:showDensityReport,
@@ -875,7 +868,7 @@ function navigate(tab){
     gst:showGSTModule,
     purchases2:showPurchasesPage,
     reports2:showAdvancedReports,
-    shiftconfig:showShiftConfig,
+    shiftconfig:()=>showSettings('shiftcfg'),
   }[tab]||renderDashboard)();
 }
 function navTo(tab){navigate(tab);}
@@ -899,7 +892,7 @@ async function renderDashboard(){
     const level=pct<25?'low':pct<50?'med':'ok';
     const fillCls=level==='low'?'fill-low':level==='med'?'fill-med':'fill-ok';
     const lvlBadge=level==='low'?'level-low':level==='med'?'level-med':'level-ok';
-    const fuelTag=t.fuel_type==='MS'?'fuel-tag-ms':t.fuel_type==='HSD'?'fuel-tag-hsd':'fuel-tag-cng';
+    const fuelTag=t.fuel_type==='MS'?'fuel-tag-ms':t.fuel_type==='HSD'?'fuel-tag-hsd':t.fuel_type==='XP'?'fuel-tag-xp':'fuel-tag-cng';
     return `<div class="tank-card">
       <div class="tank-card-head">
         <div style="display:flex;align-items:center;gap:8px">
@@ -988,7 +981,7 @@ async function renderDashboard(){
       </div>
       <table class="data-table">
         <thead><tr><th>Invoice</th><th>Fuel</th><th>Qty</th><th>Amount</th><th>Payment</th><th>Time</th></tr></thead>
-        <tbody>${(data.recentSales||[]).slice(0,8).map(s=>`<tr><td style="font-weight:600;color:var(--text)">${s.invoice_no}</td><td class="${s.fuel_type==='MS'?'fuel-name-ms':s.fuel_type==='HSD'?'fuel-name-hsd':'fuel-name-cng'}">${s.fuel_type}</td><td>${s.quantity}L</td><td style="font-weight:700">₹${fmt(s.total_amount)}</td><td><span class="badge badge-${s.payment_mode==='cash'?'cash':'upi'}">${s.payment_mode}</span></td><td style="color:var(--text3)">${new Date(s.sale_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}</td></tr>`).join('')||`<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text2)">No sales today</td></tr>`}
+        <tbody>${(data.recentSales||[]).slice(0,8).map(s=>`<tr><td style="font-weight:600;color:var(--text)">${s.invoice_no}</td><td class="${s.fuel_type==='MS'?'fuel-name-ms':s.fuel_type==='HSD'?'fuel-name-hsd':s.fuel_type==='XP'?'fuel-name-xp':'fuel-name-cng'}">${s.fuel_type}</td><td>${s.quantity}L</td><td style="font-weight:700">₹${fmt(s.total_amount)}</td><td><span class="badge badge-${s.payment_mode==='cash'?'cash':'upi'}">${s.payment_mode}</span></td><td style="color:var(--text3)">${new Date(s.sale_time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})}</td></tr>`).join('')||`<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text2)">No sales today</td></tr>`}
         </tbody>
       </table>
     </div>`;
@@ -1015,13 +1008,13 @@ async function renderSale(){
   entryValue=''; currentFuel='MS'; currentPayMode='cash'; entryMode='amount'; renderSaleUI();
 }
 function renderSaleUI(){
-  const prices={MS:currentStation?.msPrice||102,HSD:currentStation?.hsdPrice||90,CNG:currentStation?.cngPrice||85};
+  const prices={MS:currentStation?.msPrice||102,HSD:currentStation?.hsdPrice||90,CNG:currentStation?.cngPrice||85,XP:currentStation?.xpPrice||110};
   const price=prices[currentFuel]||100;
   const qty=entryMode==='litres'?parseFloat(entryValue||0):parseFloat(entryValue||0)/price;
   const amt=entryMode==='amount'?parseFloat(entryValue||0):qty*price;
   document.getElementById('mainContent').innerHTML=`
     <div class="card-title">Select Fuel</div>
-    <div class="fuel-grid">${['MS','HSD','CNG'].map(f=>`<button class="fuel-btn ${currentFuel===f?'selected':''}" onclick="selectFuel('${f}')"><div style="font-size:18px">${f==='MS'?'🟢':f==='HSD'?'🔵':'🟠'}</div><div>${f}</div><div class="fuel-price">₹${prices[f]}/L</div></button>`).join('')}</div>
+    <div class="fuel-grid">${['MS','HSD','XP'].map(f=>`<button class="fuel-btn ${currentFuel===f?'selected':''}" onclick="selectFuel('${f}')"><div style="font-size:18px">${f==='MS'?'🟢':f==='HSD'?'🔵':'⭐'}</div><div>${f}</div><div class="fuel-price">₹${prices[f]}/L</div></button>`).join('')}</div>
     <div class="mode-toggle"><button class="mode-btn ${entryMode==='amount'?'active':''}" onclick="setMode('amount')">₹ Amount</button><button class="mode-btn ${entryMode==='litres'?'active':''}" onclick="setMode('litres')">⛽ Litres</button></div>
     <div class="amount-display"><div class="rupee">${entryMode==='amount'?'₹'+entryValue:'⛽'+entryValue}</div><div class="litres">${entryMode==='amount'?`≈ ${qty.toFixed(2)}L`:`≈ ₹${amt.toFixed(2)}`}</div></div>
     <div class="keypad">${['1','2','3','4','5','6','7','8','9','.','0','⌫'].map(k=>`<button class="key ${k==='⌫'?'key-del':''}" onclick="keyPress('${k}')">${k}</button>`).join('')}</div>
@@ -1126,6 +1119,7 @@ const FUEL_CFG = {
   MS:  { label:'Petrol',  sub:'Petrol (MS)',    dot:'#ef4444', border:'rgba(239,68,68,.45)',  bg:'rgba(239,68,68,.07)',  badge:'background:rgba(239,68,68,.18);color:#fca5a5' },
   HSD: { label:'Diesel',  sub:'Diesel (HSD)',   dot:'#f97316', border:'rgba(249,115,22,.45)', bg:'rgba(249,115,22,.07)', badge:'background:rgba(249,115,22,.18);color:#fdba74' },
   CNG: { label:'CNG',     sub:'CNG (Gas)',      dot:'#3b82f6', border:'rgba(59,130,246,.45)', bg:'rgba(59,130,246,.07)', badge:'background:rgba(59,130,246,.18);color:#93c5fd' },
+  XP:  { label:'Premium', sub:'XP Premium (95)',dot:'#f59e0b', border:'rgba(245,158,11,.45)', bg:'rgba(245,158,11,.07)', badge:'background:rgba(234,179,8,.18);color:#fbbf24' },
 };
 // displayName lets stations give custom names like "XP95 Premium" to MS tanks
 function tankLabel(t){ return t.display_name || FUEL_CFG[t.fuel_type]?.label || t.fuel_type; }
@@ -1303,6 +1297,7 @@ function showAddTankModal(){
             {type:'MS',  label:'Petrol',  sub:'Petrol (MS)',   dot:'#ef4444', sel:'rgba(239,68,68,.25)'},
             {type:'HSD', label:'Diesel',  sub:'Diesel (HSD)',  dot:'#f97316', sel:'rgba(249,115,22,.25)'},
             {type:'CNG', label:'CNG',     sub:'CNG (Gas)',     dot:'#3b82f6', sel:'rgba(59,130,246,.25)'},
+            {type:'XP',  label:'Premium', sub:'XP Premium (95)',dot:'#f59e0b', sel:'rgba(245,158,11,.25)'},
           ].map(f=>`
             <button id="at_ft_${f.type}" onclick="atSelectFuel('${f.type}')"
               style="padding:16px 10px;background:var(--surface2);border:2px solid var(--border2);border-radius:12px;cursor:pointer;text-align:center;transition:.15s">
@@ -1316,7 +1311,7 @@ function showAddTankModal(){
         <!-- Custom display name -->
         <div style="margin-bottom:18px">
           <label style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:.8px;display:block;margin-bottom:6px">CUSTOM FUEL NAME <span style="font-weight:400">(optional — e.g. XP95 Premium)</span></label>
-          <input id="at_dname" placeholder="Leave blank to use default (Petrol / Diesel / CNG)" style="width:100%;padding:11px 13px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px;box-sizing:border-box"/>
+          <input id="at_dname" placeholder="Leave blank to use default (Petrol / Diesel / Premium)" style="width:100%;padding:11px 13px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px;box-sizing:border-box"/>
         </div>
 
         <!-- Tank Capacity -->
@@ -1360,7 +1355,7 @@ function showAddTankModal(){
 }
 function atSelectFuel(type){
   document.getElementById('at_fuel').value=type;
-  ['MS','HSD','CNG'].forEach(t=>{
+  ['MS','HSD','CNG','XP'].forEach(t=>{
     const b=document.getElementById(`at_ft_${t}`);
     if(!b)return;
     const cfg=FUEL_CFG[t];
@@ -2108,9 +2103,40 @@ async function addPurchase(){
 
 // ── MORE ──────────────────────────────────────────────────────────────────
 function renderMore(){
-  // Sidebar replaces the old "More" tab — renderMore() is kept for backward compat
-  // Back buttons call renderMore() — redirect to dashboard
-  navigate('dashboard');
+  // Reports hub — shows all report types as tiles
+  showReportsHub();
+}
+
+function showReportsHub(){
+  navigate('reports');
+}
+
+// ── REPORTS HUB ──────────────────────────────────────────────────────────
+async function showReportsHub_page(){
+  const today = new Date().toISOString().slice(0,10);
+  const thisMonth = today.slice(0,7);
+  document.getElementById('mainContent').innerHTML = `
+    <div class="section-title">📋 Reports & Analytics</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+      <button class="report-tile" onclick="showDailyReport()">
+        <div class="rt-icon">📊</div><div class="rt-label">Daily Report</div><div class="rt-sub">Sales · Nozzle · Shift</div>
+      </button>
+      <button class="report-tile" onclick="showAdvancedReports('nozzle-wise')">
+        <div class="rt-icon">📈</div><div class="rt-label">Advanced Reports</div><div class="rt-sub">Margin · Shift comparison</div>
+      </button>
+      <button class="report-tile" onclick="showUPIReport()">
+        <div class="rt-icon">📱</div><div class="rt-label">UPI Reconciliation</div><div class="rt-sub">PhonePe · GPay · Paytm</div>
+      </button>
+      <button class="report-tile" onclick="showVehicleReport()">
+        <div class="rt-icon">🚗</div><div class="rt-label">Vehicle Report</div><div class="rt-sub">Per-vehicle consumption</div>
+      </button>
+      <button class="report-tile" onclick="showDensityReport()">
+        <div class="rt-icon">⚗️</div><div class="rt-label">Density Analysis</div><div class="rt-sub">Purchase quality check</div>
+      </button>
+      <button class="report-tile" onclick="showAuditLog()">
+        <div class="rt-icon">📋</div><div class="rt-label">Audit Log</div><div class="rt-sub">Full activity history</div>
+      </button>
+    </div>`;
 }
 
 // ── DAILY REPORT (Sprint 1: +Date Picker, +Nozzle, +PDF, +Excel) ──────────
@@ -2945,17 +2971,52 @@ async function exportPerfExcel(m,y){
 async function showEmployees(){showPayrollHub();}
 
 
-async function showSettings(){
+async function showSettings(activeTab){
+  const tab = activeTab || 'station';
   const res=await apiFetch('/api/settings');
   const s=(await res.json()).data;
+  const tabBar = `<div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">
+    <button onclick="showSettings('station')" style="padding:7px 14px;border-radius:8px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:${tab==='station'?'var(--accent)':'var(--card)'};color:${tab==='station'?'#000':'var(--text2)'}">⚙️ Station</button>
+    <button onclick="showSettings('shiftcfg')" style="padding:7px 14px;border-radius:8px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:${tab==='shiftcfg'?'var(--accent)':'var(--card)'};color:${tab==='shiftcfg'?'#000':'var(--text2)'}">⏰ Shift Config</button>
+    <button onclick="showSettings('audit')" style="padding:7px 14px;border-radius:8px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:${tab==='audit'?'var(--accent)':'var(--card)'};color:${tab==='audit'?'#000':'var(--text2)'}">📋 Audit Log</button>
+  </div>`;
+
+  if (tab === 'shiftcfg') {
+    document.getElementById('mainContent').innerHTML = `<div class="section-title">⚙️ Settings</div>` + tabBar + `<div id="shiftCfgBody"><div class="spinner"></div></div>`;
+    const cfgRes = await apiFetch('/api/shift-configs');
+    const configs = (await cfgRes.json()).data || [];
+    document.getElementById('shiftCfgBody').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:13px;color:var(--text2)">${configs.length} shift template(s)</div>
+        <button class="btn btn-primary btn-sm" onclick="showAddShiftConfigModal()">+ Add Shift</button>
+      </div>
+      ${configs.length ? configs.map(c=>`<div class="list-item">
+        <div class="list-item-left">
+          <div class="list-item-title">${c.shift_name} <span style="font-size:11px;color:var(--text3)">${c.start_time} – ${c.end_time}</span></div>
+          <div class="list-item-sub">Sort order: ${c.sort_order}</div>
+        </div>
+        <button class="badge badge-${c.is_active?'ms':'credit'}" onclick="toggleShiftConfig(${c.id},${c.is_active})" style="cursor:pointer;border:none">${c.is_active?'Active':'Inactive'}</button>
+      </div>`).join('') : '<div class="empty">No shift templates yet</div>'}`;
+    return;
+  }
+
+  if (tab === 'audit') {
+    const logRes = await apiFetch('/api/settings/audit');
+    const logs = (await logRes.json()).data || [];
+    document.getElementById('mainContent').innerHTML = `<div class="section-title">⚙️ Settings</div>` + tabBar +
+      `<div class="card">${logs.map(l=>`<div class="list-item"><div class="list-item-left"><div class="list-item-title">${l.action}${l.resource?' · '+l.resource:''}</div><div class="list-item-sub">${l.username} · ${new Date(l.created_at).toLocaleString('en-IN')}</div></div><span class="badge badge-${l.status==='success'?'ms':'credit'}">${l.status}</span></div>`).join('')||'<div class="empty">No records</div>'}</div>`;
+    return;
+  }
+
   document.getElementById('mainContent').innerHTML=`
-    <button class="back-btn" onclick="renderMore()">← Back</button>
-    <div class="section-title">⚙️ Station Settings</div>
+    <div class="section-title">⚙️ Settings</div>
+    ${tabBar}
     <div class="card">
       <div class="form-group"><label>Station Name</label><input id="sName" value="${s.station_name||''}"/></div>
       <div class="form-group"><label>MS Price (₹/L)</label><input id="sMS" type="number" step="0.01" value="${s.ms_price||102}"/></div>
       <div class="form-group"><label>HSD Price (₹/L)</label><input id="sHSD" type="number" step="0.01" value="${s.hsd_price||90}"/></div>
       <div class="form-group"><label>CNG Price (₹/L)</label><input id="sCNG" type="number" step="0.01" value="${s.cng_price||85}"/></div>
+      <div class="form-group"><label>XP Premium Price (₹/L)</label><input id="sXP" type="number" step="0.01" value="${s.xp_price||110}"/></div>
       <div class="form-group"><label>Idle Timeout (minutes)</label><input id="sIdle" type="number" value="${s.idle_timeout||15}"/></div>
       <div class="form-group"><label>GSTIN</label><input id="sGST" value="${s.gstin||''}"/></div>
       <div class="form-group"><label>Address</label><input id="sAddr" value="${s.address||''}"/></div>
@@ -2963,11 +3024,12 @@ async function showSettings(){
       <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
     </div>`;
 }
+
 async function saveSettings(){
-  const body={stationName:document.getElementById('sName').value,msPrice:parseFloat(document.getElementById('sMS').value),hsdPrice:parseFloat(document.getElementById('sHSD').value),cngPrice:parseFloat(document.getElementById('sCNG').value),idleTimeout:parseInt(document.getElementById('sIdle').value),gstin:document.getElementById('sGST').value,address:document.getElementById('sAddr').value,mobile:document.getElementById('sMob').value};
+  const body={stationName:document.getElementById('sName').value,msPrice:parseFloat(document.getElementById('sMS').value),hsdPrice:parseFloat(document.getElementById('sHSD').value),cngPrice:parseFloat(document.getElementById('sCNG').value),xpPrice:parseFloat(document.getElementById('sXP').value),idleTimeout:parseInt(document.getElementById('sIdle').value),gstin:document.getElementById('sGST').value,address:document.getElementById('sAddr').value,mobile:document.getElementById('sMob').value};
   const res=await apiFetch('/api/settings',{method:'PUT',body});
   const data=await res.json(); if(!res.ok)return showToast(data.error,'error');
-  if(currentStation){currentStation.msPrice=body.msPrice;currentStation.hsdPrice=body.hsdPrice;currentStation.cngPrice=body.cngPrice;}
+  if(currentStation){currentStation.msPrice=body.msPrice;currentStation.hsdPrice=body.hsdPrice;currentStation.cngPrice=body.cngPrice;currentStation.xpPrice=body.xpPrice;}
   showToast('✓ Settings saved','success');
 }
 async function showAuditLog(){
@@ -3257,7 +3319,7 @@ async function showVehicleReport(fromVal, toVal, vehicleNo='', fuelType='') {
       <div class="form-group" style="flex:1;min-width:140px"><label>Vehicle No</label><input id="vrVno" value="${vehicleNo}" placeholder="e.g. KA01" style="text-transform:uppercase"/></div>
       <div class="form-group" style="flex:1;min-width:100px"><label>Fuel</label>
         <select id="vrFuel" onchange="showVehicleReport(document.getElementById('vrFrom').value,document.getElementById('vrTo').value,document.getElementById('vrVno').value,this.value)">
-          <option value="">All</option><option value="MS" ${fuelType==='MS'?'selected':''}>MS</option><option value="HSD" ${fuelType==='HSD'?'selected':''}>HSD</option>
+          <option value="">All</option><option value="MS" ${fuelType==='MS'?'selected':''}>MS</option><option value="HSD" ${fuelType==='HSD'?'selected':''}>HSD</option><option value="XP" ${fuelType==='XP'?'selected':''}>XP Premium</option>
         </select></div>
       <div style="align-self:flex-end;padding-bottom:2px">
         <button class="btn-sm" style="background:var(--accent);color:#000;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:700" onclick="showVehicleReport(document.getElementById('vrFrom').value,document.getElementById('vrTo').value,document.getElementById('vrVno').value,document.getElementById('vrFuel').value)">Search</button>
