@@ -4,7 +4,7 @@
  */
 const { Pool } = require('pg');
 const crypto = require('crypto');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 const BCRYPT_ROUNDS = 12;
 
@@ -578,7 +578,6 @@ async function initDatabase() {
 
   const existing = await pool.query('SELECT id FROM super_admin WHERE id = 1');
   if (existing.rows.length === 0) {
-    // No row yet — insert fresh
     const initPass = process.env.SUPER_ADMIN_INIT_PASS || crypto.randomBytes(16).toString('hex');
     const initHash = await hashPassword(initPass);
     await pool.query(
@@ -593,19 +592,16 @@ async function initDatabase() {
       console.log('╚══════════════════════════════════════════════════════╝');
     }
   } else if (process.env.SUPER_ADMIN_USERNAME && process.env.SUPER_ADMIN_INIT_PASS) {
-    // Row exists — if env vars are explicitly set, sync them to the DB
-    // This ensures Railway env var changes always take effect on redeploy
+    // Row exists — sync credentials from env vars on every redeploy
     const envUser = process.env.SUPER_ADMIN_USERNAME;
     const envPass = process.env.SUPER_ADMIN_INIT_PASS;
     const currentRow = existing.rows[0];
-    const usernameChanged = currentRow.username !== envUser;
-    // Always re-hash and update when env vars are present, so credentials stay in sync
     const syncHash = await hashPassword(envPass);
     await pool.query(
       'UPDATE super_admin SET username = $1, pass_hash = $2, updated_at = NOW() WHERE id = 1',
       [envUser, syncHash]
     );
-    if (usernameChanged) {
+    if (currentRow.username !== envUser) {
       console.log(`[Schema] Super admin username updated to: ${envUser}`);
     }
     console.log('[Schema] Super admin credentials synced from environment variables');
