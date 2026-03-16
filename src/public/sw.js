@@ -10,27 +10,32 @@
  *   - Push notifications: Fully wired — requires VAPID subscription from server
  */
 
-const CACHE_VERSION = 'v13';
+const CACHE_VERSION = 'v20';
 const CACHE_NAME    = `fuelbunk-${CACHE_VERSION}`;
 const SHELL_CACHE   = `fuelbunk-shell-${CACHE_VERSION}`;
 const API_CACHE     = `fuelbunk-api-${CACHE_VERSION}`;
 
 // App shell — pre-cached on install
 // FIX F-07: Added /chart.min.js (self-hosted Chart.js) so charts work offline
+// FIX BUG-06: Versioned query strings must match exactly what index.html requests,
+// otherwise SW cache lookup misses and falls back to network on every load.
+// FIX BUG-01: Removed /chart.min.js — file is absent from repo; server issues a 302
+// redirect to CDN which cannot be stored as an opaque cache entry. The CDN intercept
+// handler below will cache it on first successful network fetch instead.
 const SHELL_ASSETS = [
   '/',
-  '/multitenant.js',
-  '/utils.js',
-  '/admin.js',
-  '/employee.js',
-  '/app.js',
-  '/api-client.js',
-  '/bridge.js',
+  '/multitenant.js?v=20',
+  '/utils.js?v=14',
+  '/admin.js?v=18',
+  '/employee.js?v=16',
+  '/app.js?v=14',
+  '/api-client.js?v=14',
+  '/bridge.js?v=14',
+  '/autosave.js',
   '/manifest.json',
   '/icon-192.png',
   '/icon-512.png',
   '/apple-touch-icon.png',
-  '/chart.min.js',
 ];
 
 // ── INSTALL: pre-cache app shell ────────────────────────────────────────────
@@ -64,8 +69,9 @@ self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // FIX F-07: Intercept cdnjs Chart.js requests and serve from local cache
-  // This means even if the CDN is unreachable, Chart.js works offline.
+  // FIX BUG-01: Intercept cdnjs Chart.js requests and serve from local cache.
+  // On first load the network is hit and the response is stored under the canonical
+  // /chart.min.js key. Subsequent loads (including offline) hit the cache.
   if (url.hostname === 'cdnjs.cloudflare.com' && url.pathname.includes('chart')) {
     event.respondWith(
       caches.match('/chart.min.js').then(cached => {

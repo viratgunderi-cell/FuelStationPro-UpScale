@@ -1,295 +1,267 @@
 /**
- * FuelStation Pro - Auto-Save Functionality
- * Automatically saves form data to prevent data loss
+ * FuelBunk Pro — Modal AutoSave v2
+ *
+ * FIX BUG-09: The original AutoSave class expected static form IDs via enable(formId),
+ * but every form in this app is rendered dynamically inside a modal via innerHTML.
+ * No code ever called enable(), making the entire feature dead.
+ *
+ * This rewrite patches openModal() and closeModal() directly so autosave works
+ * automatically on every modal — zero changes needed in admin.js or employee.js.
+ *
+ * Strategy:
+ *   - openModal patches: after modal body is injected, scan inputs and attach listeners.
+ *     If a draft exists for this modal title, show a non-blocking restore banner.
+ *   - Input changes: debounce-save the entire modal-body input state to localStorage
+ *     under a key derived from the modal title.
+ *   - Drafts are cleared only when caller calls autoSave.clearDraft(title) after a
+ *     successful DB write. Plain dismiss keeps the draft for next open.
+ *
+ * Storage key format: fb_autosave_<slugified-title>
+ * Draft TTL: 2 hours — stale drafts are silently discarded.
  */
 
-class AutoSave {
-  constructor(options = {}) {
-    this.saveInterval = options.saveInterval || 5000; // 5 seconds default
-    this.storageKey = options.storageKey || 'fuelstation_autosave';
-    this.forms = new Map();
-    this.timers = new Map();
-    this.lastSaved = new Map();
-    
-    console.log('[AutoSave] Initialized');
+(function () {
+  'use strict';
+
+  const DRAFT_TTL_MS   = 2 * 60 * 60 * 1000; // 2 hours
+  const DEBOUNCE_MS    = 1200;                 // save 1.2s after last keystroke
+  const STORAGE_PREFIX = 'fb_autosave_';
+
+  // Titles of modals that must NOT be auto-saved (passwords, PINs, destructive actions)
+  const SKIP_TITLES = [
+    'change', 'password', 'pin', 'reset', 'delete', 'remove', 'lock', 'unlock',
+    'confirm', 'logout', 'session', 'gst settings',
+  ];
+
+  let _debounceTimer = null;
+  let _activeTitle   = null;
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  function _slug(title) {
+    return (title || '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 60);
   }
 
-  /**
-   * Enable auto-save for a form
-   */
-  enable(formId, options = {}) {
-    const form = document.getElementById(formId);
-    if (!form) {
-      console.warn(`[AutoSave] Form not found: ${formId}`);
-      return;
-    }
+  function _storageKey(title) { return STORAGE_PREFIX + _slug(title); }
 
-    const key = `${this.storageKey}_${formId}`;
-    this.forms.set(formId, { form, key, options });
-
-    // Attach change listeners
-    const inputs = form.querySelectorAll('input, select, textarea');
-    inputs.forEach(input => {
-      input.addEventListener('input', () => this.scheduleSave(formId));
-      input.addEventListener('change', () => this.scheduleSave(formId));
-    });
-
-    // Try to restore saved data
-    this.restore(formId);
-
-    console.log(`[AutoSave] Enabled for: ${formId}`);
+  function _shouldSkip(title) {
+    const t = (title || '').toLowerCase();
+    return SKIP_TITLES.some(function(w) { return t.includes(w); });
   }
 
-  /**
-   * Schedule a save operation
-   */
-  scheduleSave(formId) {
-    if (this.timers.has(formId)) {
-      clearTimeout(this.timers.get(formId));
-    }
-
-    const timer = setTimeout(() => {
-      this.save(formId);
-    }, this.saveInterval);
-
-    this.timers.set(formId, timer);
-  }
-
-  /**
-   * Save form data to localStorage
-   */
-  save(formId) {
-    const formData = this.forms.get(formId);
-    if (!formData) return;
-
-    const { form, key } = formData;
-    const data = this.getFormData(form);
-
+  function _readDraft(title) {
     try {
-      localStorage.setItem(key, JSON.stringify({
-        data,
-        timestamp: Date.now(),
-        version: '1.0'
-      }));
-
-      this.lastSaved.set(formId, Date.now());
-      this.showSaveIndicator(formId, 'saved');
-      
-      console.log(`[AutoSave] Saved: ${formId}`);
-    } catch (error) {
-      console.error(`[AutoSave] Save error for ${formId}:`, error);
-      this.showSaveIndicator(formId, 'error');
-    }
+      var raw = localStorage.getItem(_storageKey(title));
+      if (!raw) return null;
+      var draft = JSON.parse(raw);
+      if (!draft || !draft.savedAt) return null;
+      if (Date.now() - draft.savedAt > DRAFT_TTL_MS) {
+        localStorage.removeItem(_storageKey(title));
+        return null;
+      }
+      return draft;
+    } catch(e) { return null; }
   }
 
-  /**
-   * Restore saved data
-   */
-  restore(formId) {
-    const formData = this.forms.get(formId);
-    if (!formData) return false;
-
-    const { form, key } = formData;
-
+  function _writeDraft(title, data) {
     try {
-      const saved = localStorage.getItem(key);
-      if (!saved) return false;
-
-      const { data, timestamp } = JSON.parse(saved);
-      
-      // Check if data is too old (more than 24 hours)
-      const age = Date.now() - timestamp;
-      if (age > 24 * 60 * 60 * 1000) {
-        this.clear(formId);
-        return false;
-      }
-
-      // Show restore prompt
-      const shouldRestore = confirm(
-        `Found unsaved data from ${new Date(timestamp).toLocaleString()}.\n\nWould you like to restore it?`
-      );
-
-      if (shouldRestore) {
-        this.setFormData(form, data);
-        console.log(`[AutoSave] Restored: ${formId}`);
-        return true;
-      } else {
-        this.clear(formId);
-        return false;
-      }
-    } catch (error) {
-      console.error(`[AutoSave] Restore error for ${formId}:`, error);
-      return false;
-    }
+      localStorage.setItem(_storageKey(title), JSON.stringify(
+        { data: data, savedAt: Date.now(), title: title }
+      ));
+    } catch(e) { console.warn('[AutoSave] Write failed:', e.message); }
   }
 
-  /**
-   * Get form data as object
-   */
-  getFormData(form) {
-    const data = {};
-    const inputs = form.querySelectorAll('input, select, textarea');
-    
-    inputs.forEach(input => {
-      if (input.type === 'checkbox') {
-        data[input.name || input.id] = input.checked;
-      } else if (input.type === 'radio') {
-        if (input.checked) {
-          data[input.name || input.id] = input.value;
-        }
-      } else {
-        data[input.name || input.id] = input.value;
-      }
-    });
+  // ── Collect / apply form state ────────────────────────────────────────────
 
+  function _collectData(container) {
+    var data = {};
+    container.querySelectorAll('input, select, textarea').forEach(function(el) {
+      var k = el.id || el.name;
+      if (!k) return;
+      if (el.type === 'password' || el.type === 'hidden' || el.type === 'submit') return;
+      if (el.type === 'checkbox') { data[k] = el.checked; }
+      else if (el.type === 'radio') { if (el.checked) data[k] = el.value; }
+      else { data[k] = el.value; }
+    });
     return data;
   }
 
-  /**
-   * Set form data from object
-   */
-  setFormData(form, data) {
-    Object.entries(data).forEach(([key, value]) => {
-      const input = form.querySelector(`[name="${key}"], #${key}`);
-      if (!input) return;
-
-      if (input.type === 'checkbox') {
-        input.checked = value;
-      } else if (input.type === 'radio') {
-        if (input.value === value) {
-          input.checked = true;
+  function _applyData(container, data) {
+    Object.keys(data).forEach(function(k) {
+      var v = data[k];
+      var el = container.querySelector('#' + k) ||
+               container.querySelector('[name="' + k + '"]');
+      if (!el) return;
+      if (el.type === 'checkbox') { el.checked = !!v; }
+      else if (el.type === 'radio') { el.checked = el.value === v; }
+      else {
+        // Only restore if field has no user-set value (don't clobber pre-filled edit forms)
+        if (!el.value || el.value === el.defaultValue) {
+          el.value = v;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
         }
-      } else {
-        input.value = value;
       }
     });
   }
 
-  /**
-   * Clear saved data
-   */
-  clear(formId) {
-    const formData = this.forms.get(formId);
-    if (!formData) return;
+  // ── Restore banner (non-blocking — no confirm() dialog) ───────────────────
 
-    const { key } = formData;
-    localStorage.removeItem(key);
-    
-    console.log(`[AutoSave] Cleared: ${formId}`);
+  function _showRestoreBanner(modalBody, draft, title) {
+    if (modalBody.querySelector('.fb-draft-banner')) return;
+    var ageMin = Math.round((Date.now() - draft.savedAt) / 60000);
+    var ageStr = ageMin < 2 ? 'just now' : ageMin + ' min ago';
+    var banner = document.createElement('div');
+    banner.className = 'fb-draft-banner';
+    banner.style.cssText = [
+      'background:rgba(212,148,15,0.10)',
+      'border:1px solid rgba(212,148,15,0.30)',
+      'border-radius:8px',
+      'padding:10px 14px',
+      'margin-bottom:14px',
+      'font-size:12px',
+      'color:var(--accent-light,#f0b429)',
+      'display:flex',
+      'align-items:center',
+      'gap:10px',
+    ].join(';');
+    banner.innerHTML =
+      '<span style="flex:1">📝 Unsaved draft from <strong>' + ageStr + '</strong> — restore?</span>' +
+      '<button id="fb-draft-restore" style="background:var(--accent,#d4940f);color:#000;border:none;border-radius:6px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">Restore</button>' +
+      '<button id="fb-draft-discard" style="background:transparent;border:none;color:var(--text-3,#6b7080);cursor:pointer;font-size:14px;padding:2px 6px" title="Discard draft">✕</button>';
+    modalBody.insertBefore(banner, modalBody.firstChild);
+    banner.querySelector('#fb-draft-restore').onclick = function() {
+      _applyData(modalBody, draft.data);
+      banner.remove();
+    };
+    banner.querySelector('#fb-draft-discard').onclick = function() {
+      localStorage.removeItem(_storageKey(title));
+      banner.remove();
+    };
   }
 
-  /**
-   * Clear all saved data
-   */
-  clearAll() {
-    const keys = Object.keys(localStorage);
-    keys.forEach(key => {
-      if (key.startsWith(this.storageKey)) {
-        localStorage.removeItem(key);
-      }
+  // ── Attach listeners to all inputs in a container ─────────────────────────
+
+  function _attachListeners(modalBody, title) {
+    var save = function() {
+      clearTimeout(_debounceTimer);
+      _debounceTimer = setTimeout(function() {
+        var data = _collectData(modalBody);
+        if (Object.keys(data).length > 0) _writeDraft(title, data);
+      }, DEBOUNCE_MS);
+    };
+
+    modalBody.querySelectorAll('input, select, textarea').forEach(function(el) {
+      if (el.type === 'password' || el.type === 'hidden') return;
+      el.addEventListener('input',  save, { passive: true });
+      el.addEventListener('change', save, { passive: true });
     });
-    
-    console.log('[AutoSave] Cleared all saved data');
+
+    // Watch for inputs added after initial render (dynamic nozzle rows, etc.)
+    var obs = new MutationObserver(function(mutations) {
+      mutations.forEach(function(m) {
+        m.addedNodes.forEach(function(node) {
+          if (node.nodeType !== 1) return;
+          var els = node.matches('input,select,textarea') ? [node]
+                  : Array.from(node.querySelectorAll('input,select,textarea'));
+          els.forEach(function(el) {
+            if (el.type === 'password' || el.type === 'hidden') return;
+            el.addEventListener('input',  save, { passive: true });
+            el.addEventListener('change', save, { passive: true });
+          });
+        });
+      });
+    });
+    obs.observe(modalBody, { childList: true, subtree: true });
+    modalBody._autoSaveObs = obs;
   }
 
-  /**
-   * Show save indicator
-   */
-  showSaveIndicator(formId, status) {
-    // Try to find indicator element
-    let indicator = document.getElementById(`autosave-indicator-${formId}`);
-    
-    if (!indicator) {
-      const formData = this.forms.get(formId);
-      if (!formData) return;
+  // ── Wait for openModal / closeModal to be defined, then patch ────────────
+  // autosave.js loads after all other scripts, so they should already exist.
+  // Use a small retry loop just in case of timing edge cases.
 
-      // Create indicator if it doesn't exist
-      indicator = document.createElement('div');
-      indicator.id = `autosave-indicator-${formId}`;
-      indicator.style.cssText = `
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        background: #4CAF50;
-        color: white;
-        padding: 8px 16px;
-        border-radius: 4px;
-        font-size: 14px;
-        z-index: 10000;
-        transition: opacity 0.3s;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      `;
-      document.body.appendChild(indicator);
+  function _patchWhenReady(attempts) {
+    attempts = attempts || 0;
+    if (typeof window.openModal !== 'function' || typeof window.closeModal !== 'function') {
+      if (attempts < 20) setTimeout(function() { _patchWhenReady(attempts + 1); }, 100);
+      else console.warn('[AutoSave] openModal/closeModal not found — autosave disabled');
+      return;
     }
 
-    // Update indicator
-    if (status === 'saved') {
-      indicator.style.background = '#4CAF50';
-      indicator.textContent = '💾 Auto-saved';
-    } else if (status === 'saving') {
-      indicator.style.background = '#FF9800';
-      indicator.textContent = '⏳ Saving...';
-    } else if (status === 'error') {
-      indicator.style.background = '#f44336';
-      indicator.textContent = '❌ Save failed';
+    var _origOpen  = window.openModal;
+    var _origClose = window.closeModal;
+
+    window.openModal = function(title, bodyHtml, footerHtml, width) {
+      _activeTitle = title;
+      _origOpen.apply(this, arguments);
+      if (_shouldSkip(title)) return;
+      var overlay   = document.getElementById('modal-overlay');
+      var modalBody = overlay && overlay.querySelector('.modal-body');
+      if (!modalBody) return;
+      var draft = _readDraft(title);
+      if (draft && Object.keys(draft.data || {}).length > 0) {
+        _showRestoreBanner(modalBody, draft, title);
+      }
+      _attachListeners(modalBody, title);
+    };
+
+    window.closeModal = function() {
+      clearTimeout(_debounceTimer);
+      var overlay = document.getElementById('modal-overlay');
+      if (overlay) {
+        var body = overlay.querySelector('.modal-body');
+        if (body && body._autoSaveObs) body._autoSaveObs.disconnect();
+      }
+      _activeTitle = null;
+      _origClose.apply(this, arguments);
+    };
+
+    // Also patch appLogout to clear all drafts on sign-out
+    if (typeof window.appLogout === 'function') {
+      var _origLogout = window.appLogout;
+      window.appLogout = async function() {
+        window.autoSave.clearAll();
+        return _origLogout.apply(this, arguments);
+      };
     }
 
-    indicator.style.opacity = '1';
-
-    // Hide after 2 seconds
-    setTimeout(() => {
-      indicator.style.opacity = '0';
-    }, 2000);
+    console.log('[AutoSave] v2 ready — patched openModal/closeModal');
   }
 
-  /**
-   * Disable auto-save for a form
-   */
-  disable(formId) {
-    if (this.timers.has(formId)) {
-      clearTimeout(this.timers.get(formId));
-      this.timers.delete(formId);
-    }
+  // ── Public API ─────────────────────────────────────────────────────────────
 
-    this.forms.delete(formId);
-    this.lastSaved.delete(formId);
+  window.autoSave = {
+    /** Call after a successful DB write to discard the draft for that modal. */
+    clearDraft: function(title) {
+      try { localStorage.removeItem(_storageKey(title || _activeTitle || '')); } catch(e) {}
+    },
+    /** Debug: list all active drafts. */
+    listDrafts: function() {
+      var out = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.startsWith(STORAGE_PREFIX)) {
+          try {
+            var d = JSON.parse(localStorage.getItem(k) || '{}');
+            out.push({ title: d.title, savedAt: new Date(d.savedAt).toLocaleString() });
+          } catch(e) {}
+        }
+      }
+      return out;
+    },
+    /** Clear every draft (e.g. on logout). */
+    clearAll: function() {
+      var keys = [];
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.startsWith(STORAGE_PREFIX)) keys.push(k);
+      }
+      keys.forEach(function(k) { localStorage.removeItem(k); });
+      console.log('[AutoSave] Cleared', keys.length, 'draft(s)');
+    },
+  };
 
-    console.log(`[AutoSave] Disabled for: ${formId}`);
-  }
+  // Kick off patching
+  _patchWhenReady();
 
-  /**
-   * Get last save time
-   */
-  getLastSaveTime(formId) {
-    return this.lastSaved.get(formId);
-  }
-
-  /**
-   * Check if form has unsaved changes
-   */
-  hasUnsavedChanges(formId) {
-    const formData = this.forms.get(formId);
-    if (!formData) return false;
-
-    const { form, key } = formData;
-    const currentData = this.getFormData(form);
-
-    try {
-      const saved = localStorage.getItem(key);
-      if (!saved) return false;
-
-      const { data: savedData } = JSON.parse(saved);
-      return JSON.stringify(currentData) !== JSON.stringify(savedData);
-    } catch {
-      return false;
-    }
-  }
-}
-
-// Create global instance
-window.autoSave = new AutoSave({
-  saveInterval: 5000,
-  storageKey: 'fuelstation_autosave'
-});
-
-console.log('[AutoSave] Ready - Auto-saves every 5 seconds');
+})();

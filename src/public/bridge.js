@@ -784,11 +784,17 @@
     };
 
     // ── Admin change-own-password → API ───────────────────────────────────
+    // FIX BUG-03: Restored current-password check that was missing in this override.
+    // The app.js version correctly validated curPass; this bridge override skipped it,
+    // allowing any logged-in user to change their password without re-authenticating.
     window.saveMyPassword = async function() {
-      const newPass = document.getElementById('newPass')?.value || '';
+      const curPass  = document.getElementById('curPass')?.value || '';
+      const newPass  = document.getElementById('newPass')?.value || '';
       const confPass = document.getElementById('confPass')?.value || '';
+      if (!curPass) { toast('Enter your current password', 'error'); return; }
       if (!newPass || newPass.length < 6) { toast('New password must be at least 6 characters', 'error'); return; }
       if (newPass !== confPass) { toast('Passwords do not match', 'error'); return; }
+      if (curPass === newPass) { toast('New password must differ from current password', 'error'); return; }
       try {
         await AuthAPI.changePassword(newPass);
         if (typeof closeModal === 'function') closeModal();

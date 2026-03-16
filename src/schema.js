@@ -4,7 +4,7 @@
  */
 const { Pool } = require('pg');
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
+const bcrypt = require('bcrypt');
 
 const BCRYPT_ROUNDS = 12;
 
@@ -557,6 +557,40 @@ async function initDatabase() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
     `CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
+    // ── SUBSCRIPTIONS ───────────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS subscriptions (
+      id SERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL UNIQUE,
+      plan TEXT DEFAULT 'trial',
+      status TEXT DEFAULT 'trial',
+      trial_days INTEGER DEFAULT 30,
+      trial_start TIMESTAMPTZ DEFAULT NOW(),
+      sub_start TIMESTAMPTZ,
+      sub_end TIMESTAMPTZ,
+      price_monthly REAL DEFAULT 0,
+      grace_days INTEGER DEFAULT 3,
+      owner_phone TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS subscription_payments (
+      id SERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      plan TEXT NOT NULL,
+      amount REAL NOT NULL,
+      payment_date TIMESTAMPTZ DEFAULT NOW(),
+      payment_mode TEXT DEFAULT 'upi',
+      reference TEXT DEFAULT '',
+      months INTEGER DEFAULT 1,
+      period_start TIMESTAMPTZ,
+      period_end TIMESTAMPTZ,
+      recorded_by TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant ON subscriptions(tenant_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_sub_payments_tenant ON subscription_payments(tenant_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)`,
     `CREATE INDEX IF NOT EXISTS idx_sales_tenant_date ON sales(tenant_id, date DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address, attempted_at)`,
@@ -578,6 +612,7 @@ async function initDatabase() {
 
   const existing = await pool.query('SELECT id FROM super_admin WHERE id = 1');
   if (existing.rows.length === 0) {
+    // No row yet — insert fresh
     const initPass = process.env.SUPER_ADMIN_INIT_PASS || crypto.randomBytes(16).toString('hex');
     const initHash = await hashPassword(initPass);
     await pool.query(
@@ -592,16 +627,19 @@ async function initDatabase() {
       console.log('╚══════════════════════════════════════════════════════╝');
     }
   } else if (process.env.SUPER_ADMIN_USERNAME && process.env.SUPER_ADMIN_INIT_PASS) {
-    // Row exists — sync credentials from env vars on every redeploy
+    // Row exists — if env vars are explicitly set, sync them to the DB
+    // This ensures Railway env var changes always take effect on redeploy
     const envUser = process.env.SUPER_ADMIN_USERNAME;
     const envPass = process.env.SUPER_ADMIN_INIT_PASS;
     const currentRow = existing.rows[0];
+    const usernameChanged = currentRow.username !== envUser;
+    // Always re-hash and update when env vars are present, so credentials stay in sync
     const syncHash = await hashPassword(envPass);
     await pool.query(
       'UPDATE super_admin SET username = $1, pass_hash = $2, updated_at = NOW() WHERE id = 1',
       [envUser, syncHash]
     );
-    if (currentRow.username !== envUser) {
+    if (usernameChanged) {
       console.log(`[Schema] Super admin username updated to: ${envUser}`);
     }
     console.log('[Schema] Super admin credentials synced from environment variables');

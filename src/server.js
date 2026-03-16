@@ -864,6 +864,30 @@ async function startServer() {
         } catch (e2) { console.warn('[Tenant] Admin creation failed:', e2.message); }
       }
       await auLog(req, 'CREATE_TENANT', 'tenants', tenantId, name);
+
+      // Auto-create subscription record from request body if provided
+      const { trialDays, trialEnabled, selectedPlan, graceDays, ownerWA,
+              planPrices, subStatus, subStart, subEnd, priceMonthly } = req.body;
+      if (selectedPlan || trialDays !== undefined) {
+        try {
+          const td   = trialEnabled === false ? 0 : (parseInt(trialDays) || 30);
+          const st   = subStatus || (selectedPlan && selectedPlan !== 'trialonly' && !trialEnabled ? 'active' : 'trial');
+          const plan = (!selectedPlan || selectedPlan === 'trialonly') ? 'trial' : selectedPlan;
+          const pm   = parseFloat(priceMonthly) || 0;
+          const gd   = parseInt(graceDays) || 3;
+          const op   = ownerWA || '';
+          await pool.query(`
+            INSERT INTO subscriptions (tenant_id, plan, status, trial_days, price_monthly, grace_days, owner_phone, sub_start, sub_end, trial_start, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW())
+            ON CONFLICT(tenant_id) DO UPDATE SET
+              plan=$2, status=$3, trial_days=$4, price_monthly=$5, grace_days=$6,
+              owner_phone=$7, sub_start=COALESCE($8,subscriptions.sub_start),
+              sub_end=COALESCE($9,subscriptions.sub_end), updated_at=NOW()
+          `, [tenantId, plan, st, td, pm, gd, op, subStart||null, subEnd||null]);
+          console.log('[Tenant] Subscription created:', tenantId, plan, st);
+        } catch(se) { console.warn('[Tenant] Subscription creation failed:', se.message); }
+      }
+
       res.json({ success: true, id: tenantId });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -928,6 +952,193 @@ async function startServer() {
       console.error('[Server] DELETE tenant error:', e.message);
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // ── SUBSCRIPTION MANAGEMENT ROUTES ─────────────────────────────────────────
+
+  // GET subscription status for a tenant (super admin or own tenant)
+  app.get('/api/subscriptions/:tenantId', authMiddleware(db), async (req, res) => {
+    const tid = req.params.tenantId;
+    if (req.userType !== 'super' && req.tenantId !== tid)
+      return res.status(403).json({ error: 'Forbidden' });
+    try {
+      let sub = await pool.query('SELECT * FROM subscriptions WHERE tenant_id=$1', [tid]);
+      if (!sub.rows[0]) {
+        // Auto-create trial record for tenants without one
+        await pool.query(
+          'INSERT INTO subscriptions (tenant_id, plan, status, trial_days, trial_start) VALUES ($1,$2,$3,$4,NOW()) ON CONFLICT(tenant_id) DO NOTHING',
+          [tid, 'trial', 'trial', 30]
+        );
+        sub = await pool.query('SELECT * FROM subscriptions WHERE tenant_id=$1', [tid]);
+      }
+      const row = sub.rows[0];
+      // Compute effective status
+      const now = new Date();
+      let effectiveStatus = row.status;
+      if (row.status === 'trial') {
+        const trialEnd = new Date(row.trial_start);
+        trialEnd.setDate(trialEnd.getDate() + (row.trial_days || 30));
+        const daysLeft = Math.ceil((trialEnd - now) / 86400000);
+        effectiveStatus = daysLeft > 0 ? 'trial' : 'expired';
+        row.trial_end = trialEnd.toISOString();
+        row.trial_days_left = Math.max(0, daysLeft);
+      } else if (row.status === 'active' && row.sub_end) {
+        const subEnd = new Date(row.sub_end);
+        const graceEnd = new Date(subEnd);
+        graceEnd.setDate(graceEnd.getDate() + (row.grace_days || 3));
+        const daysLeft = Math.ceil((subEnd - now) / 86400000);
+        if (now > graceEnd) effectiveStatus = 'expired';
+        else if (now > subEnd) effectiveStatus = 'grace';
+        row.days_left = Math.max(0, daysLeft);
+      }
+      row.effective_status = effectiveStatus;
+      row.is_read_only = effectiveStatus === 'expired';
+      res.json(row);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET all subscriptions (super admin only)
+  app.get('/api/subscriptions', authMiddleware(db), reqRole('super'), async (req, res) => {
+    try {
+      // Auto-create trial subscription records for any tenant that doesn't have one
+      await pool.query(`
+        INSERT INTO subscriptions (tenant_id, plan, status, trial_days, trial_start, grace_days)
+        SELECT id, 'trial', 'trial', 30, NOW(), 3
+        FROM tenants
+        WHERE active = 1
+          AND id NOT IN (SELECT tenant_id FROM subscriptions)
+        ON CONFLICT (tenant_id) DO NOTHING
+      `);
+
+      const rows = await pool.query(`
+        SELECT s.*, t.name AS station_name, t.location, t.owner_name,
+          COALESCE(p.total_paid, 0) AS total_paid,
+          COALESCE(p.last_payment, NULL) AS last_payment
+        FROM subscriptions s
+        JOIN tenants t ON t.id = s.tenant_id
+        LEFT JOIN (
+          SELECT tenant_id, SUM(amount) AS total_paid, MAX(payment_date) AS last_payment
+          FROM subscription_payments GROUP BY tenant_id
+        ) p ON p.tenant_id = s.tenant_id
+        ORDER BY t.name ASC
+      `);
+      // Compute effective status for each
+      const now = new Date();
+      const result = rows.rows.map(row => {
+        let effectiveStatus = row.status;
+        let daysLeft = null;
+        if (row.status === 'trial') {
+          const trialEnd = new Date(row.trial_start);
+          trialEnd.setDate(trialEnd.getDate() + (row.trial_days || 30));
+          daysLeft = Math.ceil((trialEnd - now) / 86400000);
+          effectiveStatus = daysLeft > 0 ? 'trial' : 'expired';
+          row.trial_end = trialEnd.toISOString();
+        } else if (row.status === 'active' && row.sub_end) {
+          const subEnd = new Date(row.sub_end);
+          const graceEnd = new Date(subEnd);
+          graceEnd.setDate(graceEnd.getDate() + (row.grace_days || 3));
+          daysLeft = Math.ceil((subEnd - now) / 86400000);
+          if (now > graceEnd) effectiveStatus = 'expired';
+          else if (now > subEnd) effectiveStatus = 'grace';
+        }
+        return { ...row, effective_status: effectiveStatus, days_left: daysLeft };
+      });
+      res.json(result);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT upsert subscription settings (super admin only)
+  app.put('/api/subscriptions/:tenantId', authMiddleware(db), reqRole('super'), async (req, res) => {
+    const tid = req.params.tenantId;
+    const { plan, status, trial_days, price_monthly, grace_days, owner_phone, notes, sub_start, sub_end } = req.body;
+    try {
+      await pool.query(`
+        INSERT INTO subscriptions (tenant_id, plan, status, trial_days, price_monthly, grace_days, owner_phone, notes, sub_start, sub_end, trial_start, updated_at)
+        VALUES ($1, COALESCE($2,'trial'), COALESCE($3,'trial'), COALESCE($4,30), COALESCE($5,0), COALESCE($6,3), COALESCE($7,''), COALESCE($8,''), $9, $10, NOW(), NOW())
+        ON CONFLICT(tenant_id) DO UPDATE SET
+          plan = COALESCE($2, subscriptions.plan),
+          status = COALESCE($3, subscriptions.status),
+          trial_days = COALESCE($4, subscriptions.trial_days),
+          price_monthly = COALESCE($5, subscriptions.price_monthly),
+          grace_days = COALESCE($6, subscriptions.grace_days),
+          owner_phone = COALESCE($7, subscriptions.owner_phone),
+          notes = COALESCE($8, subscriptions.notes),
+          sub_start = COALESCE($9, subscriptions.sub_start),
+          sub_end = COALESCE($10, subscriptions.sub_end),
+          updated_at = NOW()
+      `, [tid, plan, status, trial_days, price_monthly, grace_days, owner_phone, notes, sub_start||null, sub_end||null]);
+      res.json({ success: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST record a payment and activate/extend subscription
+  app.post('/api/subscriptions/:tenantId/payments', authMiddleware(db), reqRole('super'), async (req, res) => {
+    const tid = req.params.tenantId;
+    const { plan, amount, payment_mode, reference, months, notes } = req.body;
+    if (!amount || !months) return res.status(400).json({ error: 'amount and months required' });
+    try {
+      // Calculate new subscription period
+      const existing = await pool.query('SELECT * FROM subscriptions WHERE tenant_id=$1', [tid]);
+      const now = new Date();
+      let periodStart = now;
+      if (existing.rows[0]?.sub_end && new Date(existing.rows[0].sub_end) > now) {
+        periodStart = new Date(existing.rows[0].sub_end); // extend from current end
+      }
+      const periodEnd = new Date(periodStart);
+      periodEnd.setMonth(periodEnd.getMonth() + parseInt(months));
+
+      // Record payment
+      await pool.query(`
+        INSERT INTO subscription_payments (tenant_id, plan, amount, payment_mode, reference, months, period_start, period_end, notes, recorded_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      `, [tid, plan||'monthly', amount, payment_mode||'upi', reference||'', months, periodStart.toISOString(), periodEnd.toISOString(), notes||'', req.adminUser?.name||'super']);
+
+      // Update subscription status to active
+      await pool.query(`
+        UPDATE subscriptions SET status='active', plan=$1, sub_start=COALESCE(sub_start,$2), sub_end=$3, updated_at=NOW()
+        WHERE tenant_id=$4
+      `, [plan||'monthly', periodStart.toISOString(), periodEnd.toISOString(), tid]);
+
+      res.json({ success: true, period_start: periodStart, period_end: periodEnd });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET payment history for a tenant
+  app.get('/api/subscriptions/:tenantId/payments', authMiddleware(db), reqRole('super'), async (req, res) => {
+    try {
+      const rows = await pool.query('SELECT * FROM subscription_payments WHERE tenant_id=$1 ORDER BY payment_date DESC', [req.params.tenantId]);
+      res.json(rows.rows);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Public endpoint — station checks its own subscription status on login
+  app.get('/api/public/subscription/:tenantId', async (req, res) => {
+    try {
+      const sub = await pool.query('SELECT * FROM subscriptions WHERE tenant_id=$1', [req.params.tenantId]);
+      if (!sub.rows[0]) return res.json({ status: 'trial', days_left: 30, is_read_only: false });
+      const row = sub.rows[0];
+      const now = new Date();
+      let effectiveStatus = row.status;
+      let daysLeft = null;
+      if (row.status === 'trial') {
+        const trialEnd = new Date(row.trial_start);
+        trialEnd.setDate(trialEnd.getDate() + (row.trial_days || 30));
+        daysLeft = Math.ceil((trialEnd - now) / 86400000);
+        effectiveStatus = daysLeft > 0 ? 'trial' : 'expired';
+      } else if (row.status === 'active' && row.sub_end) {
+        const subEnd = new Date(row.sub_end);
+        const graceEnd = new Date(subEnd);
+        graceEnd.setDate(graceEnd.getDate() + (row.grace_days || 3));
+        daysLeft = Math.ceil((subEnd - now) / 86400000);
+        if (now > graceEnd) effectiveStatus = 'expired';
+        else if (now > subEnd) effectiveStatus = 'grace';
+      }
+      res.json({
+        plan: row.plan, status: effectiveStatus, days_left: daysLeft,
+        sub_end: row.sub_end, is_read_only: effectiveStatus === 'expired',
+        price_monthly: row.price_monthly
+      });
+    } catch(e) { res.json({ status: 'trial', days_left: 30, is_read_only: false }); }
   });
 
   // Keep legacy /api/data/* and new /api/* route styles working together.
@@ -1646,6 +1857,116 @@ async function startServer() {
 
   console.log('[Server] Periodic cleanup jobs initialized (sessions: 15min, logins: 1hr, audit: 24hr)');
 
+  // ── SUBSCRIPTION EXPIRY REMINDERS — runs every 24h at startup + daily ────────
+  // Sends WhatsApp to station owner at 7, 3, 1 days before expiry
+  // Also notifies super admin when any station expires
+  const SUPER_ADMIN_PHONE = process.env.SUPER_ADMIN_PHONE || '';
+
+  async function runSubscriptionReminders() {
+    console.log('[SubReminder] Running daily subscription check...');
+    try {
+      const now = new Date();
+      const subs = await pool.query(`
+        SELECT s.*, t.name AS station_name, t.phone AS station_phone
+        FROM subscriptions s JOIN tenants t ON t.id = s.tenant_id
+        WHERE s.status IN ('trial','active')
+      `);
+
+      let remindersCount = 0;
+      for (const row of subs.rows) {
+        let expiryDate = null;
+        let isExpired = false;
+
+        if (row.status === 'trial') {
+          expiryDate = new Date(row.trial_start);
+          expiryDate.setDate(expiryDate.getDate() + (row.trial_days || 30));
+        } else if (row.status === 'active' && row.sub_end) {
+          expiryDate = new Date(row.sub_end);
+        }
+        if (!expiryDate) continue;
+
+        const daysLeft = Math.ceil((expiryDate - now) / 86400000);
+        const graceEnd = new Date(expiryDate);
+        graceEnd.setDate(graceEnd.getDate() + (row.grace_days || 3));
+        const isGraceExpired = now > graceEnd;
+
+        // Mark as expired in DB if past grace period
+        if (isGraceExpired && row.status !== 'expired') {
+          await pool.query("UPDATE subscriptions SET status='expired', updated_at=NOW() WHERE tenant_id=$1", [row.tenant_id]);
+          isExpired = true;
+          console.log('[SubReminder] Marked expired:', row.station_name);
+        }
+
+        const ownerPhone = row.owner_phone || row.station_phone || '';
+        const stationName = row.station_name || row.tenant_id;
+        const planLabel = row.status === 'trial' ? 'Trial' : (row.plan || 'Subscription');
+
+        // Send reminder to station owner
+        if (ownerPhone && [7, 3, 1].includes(daysLeft)) {
+          const msg = daysLeft === 1
+            ? `⚠️ *FuelBunk Pro — URGENT*
+
+🏪 ${stationName}
+
+Your ${planLabel} expires *TOMORROW*!
+
+After expiry you will be in read-only mode — no new sales can be recorded.
+
+Please renew immediately.
+
+_— FuelBunk Pro_`
+            : `📅 *FuelBunk Pro Reminder*
+
+🏪 ${stationName}
+
+Your ${planLabel} expires in *${daysLeft} days*.
+
+Contact your FuelBunk Pro admin to renew and avoid disruption.
+
+_— FuelBunk Pro_`;
+          await whatsapp.sendMessage(ownerPhone, msg);
+          remindersCount++;
+        }
+
+        // Notify super admin on expiry
+        if (isExpired && SUPER_ADMIN_PHONE) {
+          const msg = `🔴 *Station Subscription Expired*
+
+🏪 ${stationName}
+📅 Expired: ${expiryDate.toLocaleDateString('en-IN')}
+💰 Plan: ${planLabel}
+
+Station is now in read-only mode.
+
+_— FuelBunk Pro Auto-Alert_`;
+          await whatsapp.sendMessage(SUPER_ADMIN_PHONE, msg);
+        }
+
+        // Notify super admin 7 days before ANY station expires
+        if (daysLeft === 7 && SUPER_ADMIN_PHONE) {
+          const msg = `⚠️ *Subscription Expiring Soon*
+
+🏪 ${stationName}
+📅 Expires in 7 days: ${expiryDate.toLocaleDateString('en-IN')}
+💰 Plan: ${planLabel}
+
+Follow up with station owner for renewal.
+
+_— FuelBunk Pro_`;
+          await whatsapp.sendMessage(SUPER_ADMIN_PHONE, msg);
+        }
+      }
+      console.log('[SubReminder] Done. Reminders sent:', remindersCount);
+    } catch(e) {
+      console.error('[SubReminder] Error:', e.message);
+    }
+  }
+
+  // Run once at startup (after 5 min delay to let server settle), then every 24h
+  const subReminderTimeout = setTimeout(runSubscriptionReminders, 5 * 60 * 1000);
+  const subReminderInterval = setInterval(runSubscriptionReminders, 24 * 60 * 60 * 1000);
+  console.log('[Server] Subscription reminder job initialized (daily)');
+
   // FIX #38: Close DB pool on shutdown so in-flight queries finish cleanly
   const gracefulShutdown = async (signal) => {
     console.log(`[Server] ${signal} received — shutting down gracefully...`);
@@ -1654,6 +1975,8 @@ async function startServer() {
     clearInterval(sessionCleanupInterval);
     clearInterval(loginCleanupInterval);
     clearInterval(auditCleanupInterval);
+    clearInterval(subReminderInterval);
+    clearTimeout(subReminderTimeout);
     console.log('[Server] Cleanup jobs stopped');
     
     // Close database pool

@@ -176,6 +176,7 @@ async function mt_showSelector() {
             ${isSuperLoggedIn ? `
               <div style="font-size:11px;color:var(--text-2);margin-bottom:12px;line-height:1.6">Full control: add/edit stations, manage admins, activate/deactivate and view all data.</div>
               <button class="btn btn-accent btn-sm btn-block" onclick="mt_openCompareStations()" style="font-size:12px;font-weight:700;margin-bottom:8px">🏢 Compare Stations</button>
+              <button class="btn btn-accent btn-sm btn-block" onclick="mt_openBillingDashboard()" style="font-size:12px;font-weight:700;margin-bottom:8px;background:rgba(34,197,94,0.15);color:var(--green);border-color:rgba(34,197,94,0.4)">💳 Subscriptions & Billing</button>
               <button class="btn btn-ghost btn-sm btn-block" onclick="mt_changeSupercreds()" style="font-size:11px;margin-bottom:8px">🔑 Change Super Admin Credentials</button>
               <button class="btn btn-ghost btn-sm btn-block" onclick="mt_superLogout()" style="font-size:11px;color:var(--red)">⏻ Logout Super Admin</button>
             ` : `
@@ -228,14 +229,17 @@ function mt_showTenantForm(existing) {
   const isEdit = !!existing;
   const app = document.getElementById('app');
   const newId = existing?.id || ('t_' + Date.now().toString(36));
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
   app.innerHTML = `
-    <div style="position:fixed;inset:0;background:var(--bg-0);display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;z-index:9999">
-      <div style="width:100%;max-width:480px">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
-          <button onclick="mt_showSelector()" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);border-radius:var(--radius-sm);padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600">← Back</button>
-          <h2 style="font-size:20px;font-weight:800;color:var(--text-0)">${isEdit ? '✏️ Edit Station' : '➕ Add New Station'}</h2>
+    <div style="background:var(--bg-0);padding:10px 14px 80px;min-height:100vh">
+    <div style="position:fixed;inset:0;background:var(--bg-0);overflow-y:auto;z-index:9999">
+      <div style="width:100%;max-width:460px;margin:0 auto;padding:12px 16px 80px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:4px 0">
+          <h2 style="font-size:16px;font-weight:800;color:var(--text-0)">${isEdit ? '✏️ Edit Station' : '➕ Add New Station'}</h2>
         </div>
-        <div style="background:var(--bg-2);border-radius:var(--radius);border:1px solid var(--border);padding:24px;margin-bottom:16px">
+        <div style="background:var(--bg-2);border-radius:var(--radius);border:1px solid var(--border);padding:12px;margin-bottom:8px">
           <div class="form-group"><label class="form-label">Station Name *</label>
             <input class="form-input" id="tName" placeholder="e.g. Sri Lakshmi Fuel Station" value="${existing?.name||''}" />
           </div>
@@ -277,7 +281,9 @@ function mt_showTenantForm(existing) {
       </div>
     </div>
   `;
+
 }
+
 
 async function mt_saveTenant(isEdit) {
   const id       = document.getElementById('tId')?.value;
@@ -299,8 +305,10 @@ async function mt_saveTenant(isEdit) {
         await TenantAPI.update(id, { name, location, ownerName, phone, icon });
         mt_toast(name + ' updated', 'success');
       } else {
-        await TenantAPI.create({ name, location, ownerName, phone, icon, adminUser, adminPass });
-        mt_toast(name + ' created!', 'success');
+        // Create station — subscription will be configured from Billing dashboard
+        const result = await TenantAPI.create({ name, location, ownerName, phone, icon, adminUser, adminPass });
+        // Auto-create a 30-day trial record (server handles this via auto-create in GET /api/subscriptions)
+        mt_toast(name + ' created! Configure subscription from Billing dashboard.', 'success');
       }
       if (typeof mt_getTenants_async === 'function') await mt_getTenants_async();
       mt_showSelector();
@@ -573,6 +581,777 @@ async function mt_doSuperLogin() {
   } catch(e) { /* offline or server not ready — compare will show cached data */ }
   mt_toast('Super Admin logged in', 'success');
   mt_showSelector();
+}
+
+async function mt_openBillingDashboard() {
+  const overlay = document.createElement('div');
+  overlay.id = 'billingOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:var(--bg-0);z-index:10010;display:flex;flex-direction:column;overflow-y:auto';
+  overlay.innerHTML = `
+    <div style="max-width:900px;margin:0 auto;width:100%;padding:20px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;position:sticky;top:0;background:var(--bg-0);padding:12px 0;z-index:1">
+        <button onclick="document.getElementById('billingOverlay').remove()" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-2);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600">← Back</button>
+        <h2 style="font-size:20px;font-weight:800;color:var(--text-0)">💳 Subscriptions & Billing</h2>
+        <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+          <button id="bill-tab-stations" onclick="mt_billingTab('stations')" style="background:rgba(212,148,15,0.12);border:1px solid var(--accent);color:var(--accent-light);border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:700">💳 Stations</button>
+          <button id="bill-tab-reports" onclick="mt_billingTab('reports')" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-2);border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:700">📊 Reports</button>
+          <div id="bill-export-btns" style="display:none;gap:6px">
+            <button onclick="mt_exportReportsExcel()" style="background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);color:#22c55e;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:700">⬇ Excel</button>
+            <button onclick="mt_exportReportsPDF()"  style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);color:#ef4444;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:700">⬇ PDF</button>
+          </div>
+          <button onclick="_billingCache=null;mt_loadBillingData()" id="bill-refresh-btn" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-2);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px">🔄</button>
+        </div>
+      </div>
+      <div id="billingContent" style="text-align:center;padding:60px;color:var(--text-3)">
+        <div style="font-size:36px;margin-bottom:12px">⏳</div>
+        <div style="font-weight:600">Loading subscription data…</div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  await mt_loadBillingData();
+}
+
+// Store billing data globally so filter buttons can re-render without re-fetching
+var _billingCache = null;
+var _billingFilter = 'all'; // current active filter
+var _billingTab = 'stations'; // 'stations' | 'reports'
+
+function mt_billingTab(tab) {
+  _billingTab = tab;
+  var btnS = document.getElementById('bill-tab-stations');
+  var btnR = document.getElementById('bill-tab-reports');
+  var ACC_ON  = 'background:rgba(212,148,15,0.12);border:1px solid var(--accent);color:var(--accent-light)';
+  var ACC_OFF = 'background:var(--bg-2);border:1px solid var(--border);color:var(--text-2)';
+  if (btnS) btnS.style.cssText = btnS.style.cssText.replace(/background:[^;]+;border:[^;]+;color:[^;]+/, tab==='stations'?ACC_ON:ACC_OFF);
+  if (btnR) btnR.style.cssText = btnR.style.cssText.replace(/background:[^;]+;border:[^;]+;color:[^;]+/, tab==='reports'?ACC_ON:ACC_OFF);
+  var el = document.getElementById('billingContent');
+  if (!el) return;
+  var exportDiv = document.getElementById('bill-export-btns');
+  if (exportDiv) exportDiv.style.display = tab === 'reports' ? 'flex' : 'none';
+  if (tab === 'reports') {
+    mt_renderBillingReports(_billingCache || []);
+  } else {
+    mt_loadBillingData(_billingFilter);
+  }
+}
+
+async function mt_renderBillingReports(subs) {
+  var el = document.getElementById('billingContent');
+  if (!el) return;
+
+  // Fetch ALL payment records for revenue timeline
+  el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-3)"><div style="font-size:28px">⏳</div><div style="margin-top:8px">Building reports…</div></div>';
+
+  var allPayments = [];
+  try {
+    var token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+    // Fetch payment history for each station in parallel (max 10 concurrent)
+    var payFetches = (subs||[]).map(function(s) {
+      return fetch('/api/subscriptions/' + encodeURIComponent(s.tenant_id) + '/payments',
+        { headers: { 'Authorization': 'Bearer ' + token } })
+        .then(function(r){ return r.ok ? r.json() : []; })
+        .then(function(rows){ return rows.map(function(p){ return Object.assign({}, p, { station_name: s.station_name, location: s.location }); }); })
+        .catch(function(){ return []; });
+    });
+    var results = await Promise.all(payFetches);
+    results.forEach(function(r){ allPayments = allPayments.concat(r); });
+    // Sort newest first
+    allPayments.sort(function(a,b){ return (b.payment_date||'').localeCompare(a.payment_date||''); });
+  } catch(e) {}
+
+  var now = new Date();
+  var active   = (subs||[]).filter(function(s){return s.effective_status==='active';});
+  var trial    = (subs||[]).filter(function(s){return s.effective_status==='trial';});
+  var expired  = (subs||[]).filter(function(s){return s.effective_status==='expired'||s.effective_status==='grace';});
+  var expiring30 = (subs||[]).filter(function(s){var dl=s.days_left!==null?s.days_left:(s.trial_days_left||0);return dl>=0&&dl<=30&&s.effective_status!=='expired';});
+
+  var mrr      = active.reduce(function(a,s){return a+(parseFloat(s.price_monthly)||0);},0);
+  var arr      = mrr * 12;
+  var totalCollected = (subs||[]).reduce(function(a,s){return a+(parseFloat(s.total_paid)||0);},0);
+  var paidCount = (subs||[]).filter(function(s){return parseFloat(s.total_paid)>0;}).length;
+  var collectionRate = subs&&subs.length ? Math.round(paidCount/subs.length*100) : 0;
+
+  // Plan distribution
+  var planCounts = {};
+  (subs||[]).forEach(function(s){ var p=s.plan||'trial'; planCounts[p]=(planCounts[p]||0)+1; });
+  var planColors = {trial:'#60a5fa',monthly:'#f59e0b',quarterly:'#22c55e',halfyearly:'#a855f7',yearly:'#ef4444'};
+  var planLabels = {trial:'Trial',monthly:'Monthly',quarterly:'Quarterly',halfyearly:'Half-Yearly',yearly:'Yearly'};
+
+  // Monthly collections (last 6 months)
+  var monthlyMap = {};
+  allPayments.forEach(function(p) {
+    var d = (p.payment_date||'').slice(0,7); // YYYY-MM
+    if (!d) return;
+    monthlyMap[d] = (monthlyMap[d]||0) + (parseFloat(p.amount)||0);
+  });
+  var months6 = [];
+  for (var i=5; i>=0; i--) {
+    var d2 = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    var key = d2.getFullYear()+'-'+String(d2.getMonth()+1).padStart(2,'0');
+    var lbl = d2.toLocaleString('en-IN',{month:'short'})+" '"+String(d2.getFullYear()).slice(2);
+    months6.push({key:key, label:lbl, amount:monthlyMap[key]||0});
+  }
+  var maxMonthly = Math.max.apply(null, months6.map(function(m){return m.amount;})) || 1;
+
+  // Recent 15 payments
+  var recent = allPayments.slice(0,15);
+
+  // Expiry pipeline (next 60 days)
+  var pipeline = (subs||[])
+    .filter(function(s){var dl=s.days_left!==null?s.days_left:(s.trial_days_left||0);return dl>=0&&dl<=60&&s.effective_status!=='expired';})
+    .sort(function(a,b){var da=a.days_left!==null?a.days_left:(a.trial_days_left||999);var db=b.days_left!==null?b.days_left:(b.trial_days_left||999);return da-db;});
+
+  function cur(n){ return '₹'+(n||0).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+  function card(content, extra) { return '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:16px;'+(extra||'')+'">'+content+'</div>'; }
+  function secHead(icon,title) { return '<div style="font-size:14px;font-weight:800;color:var(--text-0);margin-bottom:14px">'+icon+' '+title+'</div>'; }
+
+  // ── KPI row ──────────────────────────────────────────────────────────────
+  var kpiRow = '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px">'
+    + '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1px">MRR</div>'
+      + '<div style="font-size:22px;font-weight:800;color:#22c55e;margin:4px 0">'+cur(mrr)+'</div>'
+      + '<div style="font-size:11px;color:var(--text-3)">ARR: <strong style="color:var(--text-1)">'+cur(arr)+'</strong></div>'
+    + '</div>'
+    + '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1px">Total Collected</div>'
+      + '<div style="font-size:22px;font-weight:800;color:var(--accent-light);margin:4px 0">'+cur(totalCollected)+'</div>'
+      + '<div style="font-size:11px;color:var(--text-3)">Collection rate: <strong style="color:'+(collectionRate>=80?'#22c55e':collectionRate>=50?'#f59e0b':'#ef4444')+'">'+collectionRate+'%</strong></div>'
+    + '</div>'
+    + '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1px">Active Stations</div>'
+      + '<div style="font-size:22px;font-weight:800;color:#22c55e;margin:4px 0">'+active.length+'</div>'
+      + '<div style="font-size:11px;color:var(--text-3)">of '+(subs||[]).length+' total stations</div>'
+    + '</div>'
+    + '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:1px">Renewals Due</div>'
+      + '<div style="font-size:22px;font-weight:800;color:'+(expiring30.length>0?'#f97316':'var(--text-0)')+';margin:4px 0">'+expiring30.length+'</div>'
+      + '<div style="font-size:11px;color:var(--text-3)">expiring within 30 days</div>'
+    + '</div>'
+    + '</div>';
+
+  // ── Plan distribution bar ─────────────────────────────────────────────────
+  var planTotal = (subs||[]).length || 1;
+  var planBars = Object.keys(planCounts).map(function(p) {
+    var pct = Math.round(planCounts[p]/planTotal*100);
+    return '<div style="margin-bottom:8px">'
+      + '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
+        + '<span style="color:var(--text-1);font-weight:600">'+(planLabels[p]||p)+'</span>'
+        + '<span style="color:var(--text-3)">'+planCounts[p]+' &nbsp;·&nbsp; '+pct+'%</span>'
+      + '</div>'
+      + '<div style="background:var(--bg-0);border-radius:4px;height:8px;overflow:hidden">'
+        + '<div style="background:'+(planColors[p]||'#888')+';width:'+pct+'%;height:100%;border-radius:4px;transition:width 0.6s"></div>'
+      + '</div>'
+    + '</div>';
+  }).join('');
+
+  // ── Monthly collections bar chart ─────────────────────────────────────────
+  var barMaxH = 80;
+  var monthBars = months6.map(function(m) {
+    var h = Math.max(4, Math.round((m.amount/maxMonthly)*barMaxH));
+    var isCurrentMonth = m.key === (now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'));
+    return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">'
+      + '<div style="font-size:10px;color:var(--text-3);font-family:monospace">'+(m.amount>0?cur(m.amount):'—')+'</div>'
+      + '<div style="width:100%;display:flex;align-items:flex-end;height:'+barMaxH+'px">'
+        + '<div style="width:100%;height:'+h+'px;background:'+(isCurrentMonth?'var(--accent)':'rgba(212,148,15,0.4)')+';border-radius:3px 3px 0 0"></div>'
+      + '</div>'
+      + '<div style="font-size:10px;color:'+(isCurrentMonth?'var(--accent-light)':'var(--text-3)')+';font-weight:'+(isCurrentMonth?'700':'400')+'">'+m.label+'</div>'
+    + '</div>';
+  }).join('');
+
+  // ── Expiry pipeline ────────────────────────────────────────────────────────
+  var pipelineRows = pipeline.length > 0 ? pipeline.map(function(s) {
+    var dl = s.days_left!==null?s.days_left:(s.trial_days_left||0);
+    var urgColor = dl<=7?'#ef4444':dl<=30?'#f97316':'#f59e0b';
+    var statusBg = s.effective_status==='trial'?'#3b82f622':'#22c55e22';
+    var statusC  = s.effective_status==='trial'?'#60a5fa':'#22c55e';
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-light)">'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:13px;font-weight:700;color:var(--text-0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+s.station_name+'</div>'
+        + '<div style="font-size:11px;color:var(--text-3)">'+s.location+'</div>'
+      + '</div>'
+      + '<div style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:'+statusBg+';color:'+statusC+';white-space:nowrap">'+s.effective_status+'</div>'
+      + '<div style="text-align:right;flex-shrink:0">'
+        + '<div style="font-size:13px;font-weight:800;color:'+urgColor+'">'+dl+'d</div>'
+        + '<div style="font-size:10px;color:var(--text-3)">remaining</div>'
+      + '</div>'
+    + '</div>';
+  }).join('') : '<div style="text-align:center;padding:20px;color:var(--text-3);font-size:13px">✅ No renewals due in the next 60 days</div>';
+
+  // ── Recent payments table ─────────────────────────────────────────────────
+  var paymentRows = recent.length > 0 ? recent.map(function(p) {
+    var modeColor = {upi:'#60a5fa',cash:'#22c55e',bank:'#a855f7',cheque:'#f59e0b'}[p.payment_mode]||'#888';
+    var planLabel = (planLabels[p.plan]||p.plan||'—');
+    return '<tr>'
+      + '<td style="padding:9px 10px;font-size:12px;color:var(--text-2)">'+(p.payment_date||'').slice(0,10)+'</td>'
+      + '<td style="padding:9px 10px;font-size:12px;font-weight:700;color:var(--text-0);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.station_name+'</td>'
+      + '<td style="padding:9px 10px;font-size:12px;color:var(--text-2)">'+planLabel+'</td>'
+      + '<td style="padding:9px 10px;font-size:12px;font-weight:800;color:#22c55e;text-align:right">'+cur(p.amount)+'</td>'
+      + '<td style="padding:9px 10px;text-align:center"><span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:'+modeColor+'22;color:'+modeColor+'">'+(p.payment_mode||'—').toUpperCase()+'</span></td>'
+      + '<td style="padding:9px 10px;font-size:11px;color:var(--text-3);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(p.reference||'—')+'</td>'
+    + '</tr>';
+  }).join('') : '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-3)">No payments recorded yet</td></tr>';
+
+  // ── Station health table ──────────────────────────────────────────────────
+  var healthRows = (subs||[]).map(function(s) {
+    var statusColors = {active:'#22c55e',trial:'#60a5fa',grace:'#f97316',expired:'#ef4444',suspended:'#9ca3af'};
+    var sc = statusColors[s.effective_status]||'#888';
+    var dl = s.days_left!==null?s.days_left:(s.trial_days_left||0);
+    var dlStr = dl!==null ? (dl>0?dl+'d':'Exp') : '—';
+    var dlColor = dl<=0?'#ef4444':dl<=7?'#ef4444':dl<=30?'#f97316':'var(--text-2)';
+    return '<tr>'
+      + '<td style="padding:8px 10px;font-size:12px;font-weight:700;color:var(--text-0)">'+s.station_name+'</td>'
+      + '<td style="padding:8px 10px"><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:'+sc+'22;color:'+sc+'">'+s.effective_status+'</span></td>'
+      + '<td style="padding:8px 10px;font-size:12px;color:var(--text-2)">'+(planLabels[s.plan]||s.plan||'—')+'</td>'
+      + '<td style="padding:8px 10px;font-size:12px;font-weight:700;color:'+dlColor+';text-align:center">'+dlStr+'</td>'
+      + '<td style="padding:8px 10px;font-size:12px;color:#22c55e;text-align:right;font-family:monospace">'+cur(s.price_monthly||0)+'/mo</td>'
+      + '<td style="padding:8px 10px;font-size:12px;color:var(--accent-light);text-align:right;font-family:monospace">'+cur(s.total_paid||0)+'</td>'
+    + '</tr>';
+  }).join('');
+
+  function thStyle(){ return 'padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-3);border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;background:var(--bg-3)'; }
+  function thR(){ return thStyle().replace('text-align:left','text-align:right'); }
+  function thC(){ return thStyle().replace('text-align:left','text-align:center'); }
+
+  el.innerHTML =
+    // KPI summary cards
+    kpiRow
+
+    // Row 1: Plan distribution + Monthly collections
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">'
+      + card(secHead('📋','Plan Distribution') + planBars)
+      + card(secHead('📈','Monthly Collections') + '<div style="display:flex;align-items:flex-end;gap:4px;height:'+barMaxH+'px">'+monthBars+'</div>')
+    + '</div>'
+
+    // Row 2: Expiry pipeline + Station health
+    + '<div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:14px">'
+      + card(secHead('🔔','Renewal Pipeline — Next 60 Days') + pipelineRows)
+    + '</div>'
+
+    // Row 3: Recent payments
+    + card(secHead('💵','Recent Payments') +
+        '<div style="overflow-x:auto">'
+        + '<table style="width:100%;border-collapse:collapse">'
+          + '<thead><tr>'
+            + '<th style="'+thStyle()+'">Date</th>'
+            + '<th style="'+thStyle()+'">Station</th>'
+            + '<th style="'+thStyle()+'">Plan</th>'
+            + '<th style="'+thR()+'">Amount</th>'
+            + '<th style="'+thC()+'">Mode</th>'
+            + '<th style="'+thStyle()+'">Reference</th>'
+          + '</tr></thead>'
+          + '<tbody>'+paymentRows+'</tbody>'
+        + '</table>'
+        + '</div>', 'margin-bottom:14px')
+
+    // Row 4: Full station health matrix
+    + card(secHead('🏪','All Stations Health Matrix') +
+        '<div style="overflow-x:auto">'
+        + '<table style="width:100%;border-collapse:collapse">'
+          + '<thead><tr>'
+            + '<th style="'+thStyle()+'">Station</th>'
+            + '<th style="'+thStyle()+'">Status</th>'
+            + '<th style="'+thStyle()+'">Plan</th>'
+            + '<th style="'+thC()+'">Days Left</th>'
+            + '<th style="'+thR()+'">Rate</th>'
+            + '<th style="'+thR()+'">Collected</th>'
+          + '</tr></thead>'
+          + '<tbody>'+healthRows+'</tbody>'
+        + '</table>'
+        + '</div>');
+}
+
+
+async function mt_loadBillingData(filter) {
+  if (filter !== undefined) _billingFilter = filter;
+  const el = document.getElementById('billingContent');
+  if (!el) return;
+
+  // Fetch only if no cache or explicit refresh (no filter arg)
+  if (!_billingCache || filter === undefined) {
+    el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-3)"><div style="font-size:28px;margin-bottom:8px">⏳</div>Loading…</div>';
+    try {
+      const token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+      const resp = await fetch('/api/subscriptions', { headers: { 'Authorization': 'Bearer ' + token } });
+      if (!resp.ok) { el.innerHTML = '<div style="color:var(--red);padding:40px;text-align:center">⚠️ Could not load. Make sure you are logged in as super admin.</div>'; return; }
+      _billingCache = await resp.json();
+    } catch(e) { el.innerHTML = '<div style="color:var(--red);padding:40px;text-align:center">Error: '+e.message+'</div>'; return; }
+  }
+
+  var subs = _billingCache;
+  var total      = subs.length;
+  var active     = subs.filter(function(s){return s.effective_status==='active';}).length;
+  var trial      = subs.filter(function(s){return s.effective_status==='trial';}).length;
+  var expired    = subs.filter(function(s){return s.effective_status==='expired'||s.effective_status==='grace';}).length;
+  var expiringSoon = subs.filter(function(s){ var dl=s.days_left!==null?s.days_left:(s.trial_days_left||0); return dl<=30 && dl>=0 && s.effective_status!=='expired'; }).length;
+  var mrr        = subs.filter(function(s){return s.effective_status==='active';}).reduce(function(a,s){return a+(s.price_monthly||0);},0);
+  var totalPaid  = subs.reduce(function(a,s){return a+(parseFloat(s.total_paid)||0);},0);
+
+  function statusBadge(s) {
+    var m = {trial:['#3b82f6','Trial'],active:['#22c55e','Active'],grace:['#f97316','Grace'],expired:['#ef4444','Expired'],suspended:['#9ca3af','Suspended']};
+    var cm = m[s]||m.expired; var c=cm[0]; var l=cm[1];
+    return '<span style="background:'+c+'22;color:'+c+';font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px">'+l+'</span>';
+  }
+
+  function statBtn(filterKey, icon, label, value, color, urgent) {
+    var isActive = _billingFilter === filterKey;
+    var border = isActive ? (color||'var(--accent)') : 'var(--border)';
+    var bg = isActive ? (urgent ? 'rgba(249,115,22,0.08)' : 'rgba(212,148,15,0.06)') : 'var(--bg-2)';
+    return '<button data-filter="'+filterKey+'" onclick="mt_loadBillingData(this.dataset.filter)" style="background:'+bg+';border:2px solid '+border+';border-radius:8px;padding:10px;text-align:center;cursor:pointer;width:100%;transition:border 0.15s">'
+      + '<div style="font-size:18px;font-weight:800;color:'+(color||'var(--text-0)')+'">'+value+'</div>'
+      + '<div style="font-size:11px;color:var(--text-3);margin-top:2px">'+icon+' '+label+'</div>'
+      + (isActive ? '<div style="font-size:9px;color:'+border+';margin-top:2px;font-weight:700">● FILTERED</div>' : '')
+      + '</button>';
+  }
+
+  var statRow = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">'
+    + statBtn('all',     '🏪', 'All Stations',    total,                                'var(--text-0)', false)
+    + statBtn('active',  '✅', 'Active',           active,                               '#22c55e',       false)
+    + statBtn('trial',   '⏱️', 'Trial',            trial,                                '#60a5fa',       false)
+    + statBtn('expired', '⚠️', 'Expired',          expired,                              '#ef4444',       false)
+    + statBtn('soon',    '🔔', 'Expiring ≤30 Days',expiringSoon,                         '#f97316',       true)
+    + statBtn('mrr',     '💰', 'MRR',              '₹'+mrr.toLocaleString('en-IN'),      '#22c55e',       false)
+    + '</div>';
+
+  // Apply filter
+  var filtered = subs;
+  if (_billingFilter === 'active')  filtered = subs.filter(function(s){return s.effective_status==='active';});
+  if (_billingFilter === 'trial')   filtered = subs.filter(function(s){return s.effective_status==='trial';});
+  if (_billingFilter === 'expired') filtered = subs.filter(function(s){return s.effective_status==='expired'||s.effective_status==='grace';});
+  if (_billingFilter === 'soon')    filtered = subs.filter(function(s){ var dl=s.days_left!==null?s.days_left:(s.trial_days_left||0); return dl<=30&&dl>=0&&s.effective_status!=='expired'; });
+
+  // Filter label
+  var filterLabels = {all:'All Stations',active:'Active Subscriptions',trial:'Trial Accounts',expired:'Expired / Grace',soon:'Expiring within 30 Days',mrr:'All Stations'};
+  var filterBar = _billingFilter !== 'all' && _billingFilter !== 'mrr'
+    ? '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 12px;background:rgba(212,148,15,0.06);border:1px solid rgba(212,148,15,0.2);border-radius:8px">'
+      + '<span style="font-size:12px;font-weight:700;color:var(--accent-light)">Showing: '+filterLabels[_billingFilter]+'</span>'
+      + '<span style="font-size:11px;color:var(--text-3)">('+filtered.length+' station'+(filtered.length!==1?'s':'')+')</span>'
+      + '<button onclick="mt_loadBillingData(\'all\')" style="margin-left:auto;background:none;border:none;color:var(--text-3);cursor:pointer;font-size:11px;text-decoration:underline">Clear filter ✕</button>'
+      + '</div>'
+    : '';
+
+  var planLabels = {trial:'Trial',monthly:'Monthly',quarterly:'Quarterly',halfyearly:'Half-Yearly',yearly:'Yearly'};
+  var cards = '';
+  filtered.forEach(function(s) {
+    var daysLeft = s.days_left !== null ? s.days_left : (s.trial_days_left || 0);
+    var daysLabel = s.effective_status === 'trial'
+      ? ((s.trial_days_left||0) > 0 ? (s.trial_days_left||0)+' trial days left' : 'Trial expired')
+      : (s.days_left !== null ? (s.days_left > 0 ? s.days_left+' days left' : 'Expired') : '—');
+    var urgency = s.effective_status === 'expired' ? 'rgba(239,68,68,0.4)'
+      : daysLeft <= 7 ? 'rgba(239,68,68,0.3)'
+      : daysLeft <= 30 ? 'rgba(249,115,22,0.3)'
+      : 'var(--border)';
+    var planLabel = planLabels[s.plan]||s.plan||'Trial';
+    var safeName = (s.station_name||s.tenant_id||'').replace(/'/g,'');
+    cards += '<div style="background:var(--bg-2);border:1px solid '+urgency+';border-radius:10px;padding:14px;margin-bottom:10px">';
+    cards += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">';
+    cards += '<div><div style="font-size:15px;font-weight:800;color:var(--text-0)">'+(s.station_name||s.tenant_id||'')+'</div>';
+    cards += '<div style="font-size:11px;color:var(--text-3)">'+(s.location||'')+(s.owner_name?' · '+s.owner_name:'')+'</div></div>';
+    cards += '<div style="text-align:right">'+statusBadge(s.effective_status)+'<div style="font-size:11px;color:'+(daysLeft<=7?'var(--red)':daysLeft<=30?'var(--orange)':'var(--text-3)')+';margin-top:3px">'+daysLabel+'</div></div></div>';
+    cards += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:11px;margin-bottom:10px">';
+    cards += '<div style="background:var(--bg-0);border-radius:6px;padding:6px;text-align:center"><div style="font-weight:700">'+planLabel+'</div><div style="color:var(--text-3)">Plan</div></div>';
+    cards += '<div style="background:var(--bg-0);border-radius:6px;padding:6px;text-align:center"><div style="font-weight:700;font-family:monospace">₹'+(s.price_monthly||0).toLocaleString('en-IN')+'</div><div style="color:var(--text-3)">Monthly</div></div>';
+    cards += '<div style="background:var(--bg-0);border-radius:6px;padding:6px;text-align:center"><div style="font-weight:700;font-family:monospace">₹'+Math.round(s.total_paid||0).toLocaleString('en-IN')+'</div><div style="color:var(--text-3)">Collected</div></div>';
+    cards += '</div>';
+    cards += '<div style="display:flex;gap:8px">';
+    cards += '<button data-tid="'+s.tenant_id+'" data-name="'+safeName+'" data-price="'+(s.price_monthly||0)+'" onclick="mt_recordPaymentFromBilling(this.dataset.tid,this.dataset.name,parseFloat(this.dataset.price))" style="flex:1;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#4ade80;border-radius:6px;padding:7px;font-size:12px;font-weight:700;cursor:pointer">💰 Record Payment</button>';
+    cards += '<button data-tid="'+s.tenant_id+'" data-name="'+safeName+'" onclick="mt_subSettingsFromBilling(this.dataset.tid,this.dataset.name)" style="flex:1;background:var(--bg-0);border:1px solid var(--border);color:var(--text-2);border-radius:6px;padding:7px;font-size:12px;font-weight:700;cursor:pointer">⚙️ Settings</button>';
+    cards += '</div></div>';
+  });
+  if (!cards) cards = '<div style="text-align:center;padding:40px;color:var(--text-3)">No stations match this filter</div>';
+
+  el.innerHTML = statRow + filterBar + cards;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BILLING REPORTS — Excel / CSV export
+// ─────────────────────────────────────────────────────────────────────────────
+function mt_exportReportsExcel() {
+  var subs = _billingCache || [];
+  if (!subs.length) { if (typeof mt_toast==='function') mt_toast('No data to export', 'error'); return; }
+  var planLabels = {trial:'Trial',monthly:'Monthly',quarterly:'Quarterly',halfyearly:'Half-Yearly',yearly:'Yearly'};
+  var dateStr = new Date().toISOString().slice(0,10);
+
+  var active = subs.filter(function(s){return s.effective_status==='active';});
+  var mrr    = active.reduce(function(a,s){return a+(parseFloat(s.price_monthly)||0);},0);
+  var total  = subs.reduce(function(a,s){return a+(parseFloat(s.total_paid)||0);},0);
+
+  var token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+  var payFetches = subs.map(function(s) {
+    return fetch('/api/subscriptions/' + encodeURIComponent(s.tenant_id) + '/payments',
+      { headers: { 'Authorization': 'Bearer ' + token } })
+      .then(function(r){ return r.ok ? r.json() : []; })
+      .then(function(rows){ return rows.map(function(p){ return Object.assign({},p,{station_name:s.station_name}); }); })
+      .catch(function(){ return []; });
+  });
+
+  Promise.all(payFetches).then(function(results) {
+    var allPayments = [];
+    results.forEach(function(r){ allPayments = allPayments.concat(r); });
+    allPayments.sort(function(a,b){ return (b.payment_date||'').localeCompare(a.payment_date||''); });
+
+    function rowToCSV(row) {
+      return row.map(function(cell) {
+        var s = String(cell === null || cell === undefined ? '' : cell);
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) s = '"' + s.replace(/"/g, '""') + '"';
+        return s;
+      }).join(',');
+    }
+
+    var lines = [];
+    // Sheet 1 header
+    lines.push('=== STATION HEALTH MATRIX ===');
+    lines.push(rowToCSV(['Station', 'Location', 'Owner', 'Status', 'Plan', 'Days Left', 'Monthly Rate (INR)', 'Total Collected (INR)', 'Last Payment']));
+    subs.forEach(function(s) {
+      var dl = s.days_left !== null ? s.days_left : (s.trial_days_left || 0);
+      lines.push(rowToCSV([
+        s.station_name||'', s.location||'', s.owner_name||'',
+        s.effective_status||'', planLabels[s.plan]||s.plan||'',
+        dl, s.price_monthly||0, parseFloat(s.total_paid)||0,
+        s.last_payment ? s.last_payment.slice(0,10) : '',
+      ]));
+    });
+    lines.push('');
+    lines.push(rowToCSV(['SUMMARY','']));
+    lines.push(rowToCSV(['Total Stations', subs.length]));
+    lines.push(rowToCSV(['Active', active.length]));
+    lines.push(rowToCSV(['Trial', subs.filter(function(s){return s.effective_status==='trial';}).length]));
+    lines.push(rowToCSV(['Expired', subs.filter(function(s){return s.effective_status==='expired'||s.effective_status==='grace';}).length]));
+    lines.push(rowToCSV(['MRR (INR)', mrr]));
+    lines.push(rowToCSV(['ARR (INR)', mrr * 12]));
+    lines.push(rowToCSV(['Total Collected (INR)', total]));
+
+    // Sheet 2 payments
+    lines.push('');
+    lines.push('=== PAYMENT HISTORY ===');
+    lines.push(rowToCSV(['Date', 'Station', 'Plan', 'Amount (INR)', 'Mode', 'Reference', 'Months', 'Period Start', 'Period End']));
+    allPayments.forEach(function(p) {
+      lines.push(rowToCSV([
+        (p.payment_date||'').slice(0,10), p.station_name||'',
+        planLabels[p.plan]||p.plan||'', parseFloat(p.amount)||0,
+        (p.payment_mode||'').toUpperCase(), p.reference||'',
+        p.months||1, (p.period_start||'').slice(0,10), (p.period_end||'').slice(0,10),
+      ]));
+    });
+
+    var csv = '\uFEFF' + lines.join('\r\n'); // BOM for Excel UTF-8
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'FuelBunkPro_BillingReport_' + dateStr + '.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1000);
+    if (typeof mt_toast === 'function') mt_toast('\u2705 Excel / CSV downloaded', 'success');
+  }).catch(function(e) {
+    if (typeof mt_toast === 'function') mt_toast('Export failed: ' + e.message, 'error');
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BILLING REPORTS — PDF export (print-to-PDF via browser print dialog)
+// ─────────────────────────────────────────────────────────────────────────────
+async function mt_exportReportsPDF() {
+  var subs = _billingCache || [];
+  if (!subs.length) { if (typeof mt_toast==='function') mt_toast('No data to export', 'error'); return; }
+  if (typeof mt_toast==='function') mt_toast('\u23f3 Preparing PDF…', 'info');
+
+  var planLabels = {trial:'Trial',monthly:'Monthly',quarterly:'Quarterly',halfyearly:'Half-Yearly',yearly:'Yearly'};
+  var dateStr = new Date().toLocaleDateString('en-IN', {day:'numeric',month:'long',year:'numeric'});
+  var token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+
+  var allPayments = [];
+  try {
+    var results = await Promise.all(subs.map(function(s) {
+      return fetch('/api/subscriptions/' + encodeURIComponent(s.tenant_id) + '/payments',
+        { headers: { 'Authorization': 'Bearer ' + token } })
+        .then(function(r){ return r.ok ? r.json() : []; })
+        .then(function(rows){ return rows.map(function(p){ return Object.assign({},p,{station_name:s.station_name}); }); })
+        .catch(function(){ return []; });
+    }));
+    results.forEach(function(r){ allPayments = allPayments.concat(r); });
+    allPayments.sort(function(a,b){ return (b.payment_date||'').localeCompare(a.payment_date||''); });
+  } catch(e) {}
+
+  var active    = subs.filter(function(s){return s.effective_status==='active';});
+  var trial     = subs.filter(function(s){return s.effective_status==='trial';});
+  var expired   = subs.filter(function(s){return s.effective_status==='expired'||s.effective_status==='grace';});
+  var mrr       = active.reduce(function(a,s){return a+(parseFloat(s.price_monthly)||0);},0);
+  var totalColl = subs.reduce(function(a,s){return a+(parseFloat(s.total_paid)||0);},0);
+  var expiring30 = subs.filter(function(s){var dl=s.days_left!==null?s.days_left:(s.trial_days_left||0);return dl>=0&&dl<=30&&s.effective_status!=='expired';});
+
+  function cur(n){ return '\u20b9' + (n||0).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+  function sc(s){ return {active:'#16a34a',trial:'#2563eb',grace:'#d97706',expired:'#dc2626',suspended:'#6b7280'}[s]||'#6b7280'; }
+
+  var healthRows = subs.map(function(s) {
+    var dl = s.days_left!==null ? s.days_left : (s.trial_days_left||0);
+    var dlc = dl<=7?'#dc2626':dl<=30?'#d97706':'#374151';
+    return '<tr><td>' + (s.station_name||'') + '</td>'
+      + '<td><span style="background:'+sc(s.effective_status)+'22;color:'+sc(s.effective_status)+';padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700">' + (s.effective_status||'') + '</span></td>'
+      + '<td>' + (planLabels[s.plan]||s.plan||'') + '</td>'
+      + '<td style="text-align:center;font-weight:700;color:'+dlc+'">' + (dl!==null?dl+'d':'') + '</td>'
+      + '<td style="text-align:right;font-family:monospace">' + cur(s.price_monthly||0) + '/mo</td>'
+      + '<td style="text-align:right;font-family:monospace;color:#b45309">' + cur(s.total_paid||0) + '</td></tr>';
+  }).join('');
+
+  var payRows = allPayments.slice(0,30).map(function(p) {
+    var mc = {upi:'#2563eb',cash:'#16a34a',bank:'#7c3aed',cheque:'#d97706'}[p.payment_mode]||'#6b7280';
+    return '<tr><td style="font-size:11px">' + (p.payment_date||'').slice(0,10) + '</td>'
+      + '<td style="font-weight:600">' + (p.station_name||'') + '</td>'
+      + '<td>' + (planLabels[p.plan]||p.plan||'') + '</td>'
+      + '<td style="text-align:right;font-weight:700;color:#16a34a;font-family:monospace">' + cur(p.amount) + '</td>'
+      + '<td style="text-align:center"><span style="background:'+mc+'22;color:'+mc+';padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700">'+(p.payment_mode||'').toUpperCase()+'</span></td>'
+      + '<td style="font-size:11px;color:#6b7280">' + (p.reference||'\u2014') + '</td></tr>';
+  }).join('');
+
+  var html = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    + '<title>FuelBunk Pro \u2014 Billing Report</title>'
+    + '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111;margin:0;padding:28px;font-size:13px}'
+    + 'h1{font-size:22px;font-weight:800;margin:0}h2{font-size:13px;font-weight:700;margin:22px 0 8px;color:#374151;border-bottom:2px solid #f3f4f6;padding-bottom:5px}'
+    + '.meta{font-size:11px;color:#9ca3af;margin-bottom:18px}'
+    + '.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}'
+    + '.kpi{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px}'
+    + '.kpi-l{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#9ca3af}'
+    + '.kpi-v{font-size:20px;font-weight:800;margin:4px 0}.kpi-s{font-size:11px;color:#6b7280}'
+    + 'table{width:100%;border-collapse:collapse;margin-bottom:18px;font-size:12px}'
+    + 'th{background:#f3f4f6;padding:7px 9px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.7px;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb}'
+    + 'th.r{text-align:right}th.c{text-align:center}'
+    + 'td{padding:7px 9px;border-bottom:1px solid #f3f4f6}'
+    + 'tr:nth-child(even) td{background:#fafafa}'
+    + '.footer{margin-top:20px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af;display:flex;justify-content:space-between}'
+    + '@media print{.no-print{display:none}@page{margin:1.5cm;size:A4}}'
+    + '</style></head><body>'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">'
+      + '<div><h1>\u26fd FuelBunk Pro</h1><div class="meta">Subscriptions & Billing Report &nbsp;\u00b7&nbsp; ' + dateStr + '</div></div>'
+      + '<button class="no-print" onclick="window.print()" style="background:#d4940f;color:#000;border:none;border-radius:8px;padding:10px 20px;font-size:13px;font-weight:700;cursor:pointer">\ud83d\udda8 Print / Save as PDF</button>'
+    + '</div>'
+    + '<div class="kpis">'
+      + '<div class="kpi"><div class="kpi-l">MRR</div><div class="kpi-v" style="color:#16a34a">' + cur(mrr) + '</div><div class="kpi-s">ARR: ' + cur(mrr*12) + '</div></div>'
+      + '<div class="kpi"><div class="kpi-l">Total Collected</div><div class="kpi-v" style="color:#b45309">' + cur(totalColl) + '</div><div class="kpi-s">' + allPayments.length + ' payments</div></div>'
+      + '<div class="kpi"><div class="kpi-l">Stations</div><div class="kpi-v">' + subs.length + '</div><div class="kpi-s">Active: ' + active.length + ' &nbsp;\u00b7&nbsp; Trial: ' + trial.length + ' &nbsp;\u00b7&nbsp; Expired: ' + expired.length + '</div></div>'
+      + '<div class="kpi"><div class="kpi-l">Due \u226430 days</div><div class="kpi-v" style="color:' + (expiring30.length?'#d97706':'#16a34a') + '">' + expiring30.length + '</div><div class="kpi-s">renewals expiring soon</div></div>'
+    + '</div>'
+    + '<h2>\ud83c\udfe2 Station Health Matrix</h2>'
+    + '<table><thead><tr><th>Station</th><th>Status</th><th>Plan</th><th class="c">Days Left</th><th class="r">Rate</th><th class="r">Collected</th></tr></thead>'
+    + '<tbody>' + healthRows + '</tbody></table>'
+    + '<h2>\ud83d\udcb5 Payment History' + (allPayments.length > 30 ? ' (latest 30 of ' + allPayments.length + ')' : '') + '</h2>'
+    + (payRows
+      ? '<table><thead><tr><th>Date</th><th>Station</th><th>Plan</th><th class="r">Amount</th><th class="c">Mode</th><th>Reference</th></tr></thead><tbody>' + payRows + '</tbody></table>'
+      : '<p style="color:#9ca3af">No payments recorded yet.</p>')
+    + '<div class="footer"><span>FuelBunk Pro \u2014 Confidential</span><span>Printed: ' + new Date().toLocaleString('en-IN') + '</span></div>'
+    + '</body></html>';
+
+  var win = window.open('', '_blank', 'width=1050,height=780');
+  if (!win) { if(typeof mt_toast==='function') mt_toast('\u26a0\ufe0f Allow pop-ups to export PDF', 'error'); return; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  win.onload = function() { setTimeout(function(){ win.print(); }, 500); };
+  if (typeof mt_toast === 'function') mt_toast('\u2705 PDF ready \u2014 choose "Save as PDF" in print dialog', 'success');
+}
+
+
+async function mt_recordPaymentFromBilling(tenantId, stationName, defaultPrice) {
+  // Pull saved plan prices from billing cache
+  var subData = (_billingCache||[]).find(function(s){return s.tenant_id===tenantId;}) || {};
+  var sp = {}; try { var _m=(subData.notes||'').match(/Prices: ({.*})/); if(_m) sp=JSON.parse(_m[1]); } catch(e2){}
+  var PP = {monthly:sp.monthly||subData.price_monthly||0, quarterly:sp.quarterly||0, halfyearly:sp.halfyearly||0, yearly:sp.yearly||0};
+  var curPlan = subData.plan||'quarterly';
+  if (curPlan==='trial') curPlan='monthly';
+  var initAmt = PP[curPlan] || defaultPrice || 0;
+
+  var plans = [['monthly','Monthly (1 mo)'],['quarterly','Quarterly (3 mo)'],['halfyearly','Half-Yearly (6 mo)'],['yearly','Yearly (12 mo)']];
+  var planOpts = plans.map(function(pv){
+    return '<option value="'+pv[0]+'" '+(curPlan===pv[0]?'selected':'')+'>'+pv[1]+'</option>';
+  }).join('');
+  var ppJson = JSON.stringify(PP);
+  var html = '<div style="padding:4px 0">'    + '<div style="margin-bottom:12px"><label style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase">Plan</label>'    + '<select id="rp2_plan" onchange="(function(sel){var pp='+ppJson+';var a=document.getElementById(\'rp2_amount\');if(a&&pp[sel.value])a.value=pp[sel.value];})(this)" style="width:100%;margin-top:4px;padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-size:13px">'+planOpts+'</select></div>'    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">'    + '<div><label style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase">Amount (₹)</label><input id="rp2_amount" type="number" value="'+Math.round(initAmt)+'" style="width:100%;margin-top:4px;padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-size:13px" /></div>'    + '<div><label style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase">Mode</label><select id="rp2_mode" style="width:100%;margin-top:4px;padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-size:13px"><option value="cash">Cash</option><option value="upi">UPI</option><option value="bank">Bank Transfer</option><option value="cheque">Cheque</option></select></div>'    + '</div>'    + '<div style="margin-bottom:12px"><label style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase">Reference / UTR</label><input id="rp2_ref" placeholder="UPI ref, UTR, cheque no..." style="width:100%;margin-top:4px;padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-size:13px" /></div>'    + '</div>';
+
+  const _dialogEl = await mt_confirmDialog('\ud83d\udcb0 Record Payment \u2014 ' + stationName, html, 'Record Payment');
+  if (!_dialogEl) return; // cancelled
+  // FIX: Read ALL values while the overlay is still attached to the DOM.
+  // The confirm button now passes the overlay element to the resolver so we
+  // can safely query its fields here. Previously .remove() ran synchronously
+  // before the await resumed — getElementById returned null — amount was 0.
+  const _q = function(id) { return _dialogEl && _dialogEl.querySelector ? _dialogEl.querySelector('#'+id) : document.getElementById(id); };
+  const plan   = _q('rp2_plan')?.value  || 'monthly';
+  const amount = parseFloat(_q('rp2_amount')?.value) || 0;
+  const mode   = _q('rp2_mode')?.value  || 'cash';
+  const ref    = (_q('rp2_ref')?.value  || '').trim();
+  if (_dialogEl && _dialogEl.remove) _dialogEl.remove(); // safe to remove now
+  const months = {monthly:1,quarterly:3,halfyearly:6,yearly:12}[plan] || 1;
+  if (!amount) { mt_toast('Enter a valid amount', 'error'); return; }
+  try {
+    const token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+    const resp = await fetch('/api/subscriptions/' + encodeURIComponent(tenantId) + '/payments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ plan, amount, payment_mode: mode, reference: ref, months })
+    });
+    if (!resp.ok) { const r = await resp.json(); mt_toast(r.error || 'Failed', 'error'); return; }
+    mt_toast('\u2705 Payment recorded \u2014 subscription extended!', 'success');
+    _billingCache=null; await mt_loadBillingData();
+    // Second reload after 1.5s to catch Railway DB propagation delay
+    setTimeout(function(){_billingCache=null; mt_loadBillingData();}, 1500);
+  } catch(e) { mt_toast('Error: ' + e.message, 'error'); }
+}
+
+
+async function mt_subSettingsFromBilling(tenantId, stationName) {
+  try {
+    var token = typeof getAuthToken === 'function' ? getAuthToken() : '';
+    var resp = await fetch('/api/subscriptions/' + encodeURIComponent(tenantId), { headers: { 'Authorization': 'Bearer ' + token } });
+    var sub = await resp.json();
+    var sp = {}; try { var m2=(sub.notes||'').match(/Prices: ({.*})/); if(m2) sp=JSON.parse(m2[1]); } catch(e2){}
+    var graceDays = sub.grace_days || 3;
+    var PLANS = [
+      {id:'monthly',    label:'Monthly',     dur:'1 month',   months:1},
+      {id:'quarterly',  label:'Quarterly',   dur:'3 months',  months:3},
+      {id:'halfyearly', label:'Half-Yearly', dur:'6 months',  months:6},
+      {id:'yearly',     label:'Yearly',      dur:'12 months', months:12},
+      {id:'trial',      label:'Trial Only',  dur:'no billing',months:0},
+    ];
+    var activePlan = sub.plan || 'trial';
+
+    function calcEnd(planId, gd) {
+      var p = PLANS.find(function(x){return x.id===planId;});
+      if (!p || p.months === 0) return '';
+      var d = new Date(); d.setMonth(d.getMonth()+p.months); d.setDate(d.getDate()+(parseInt(gd)||0));
+      return d.toISOString().slice(0,10);
+    }
+    function fmtDate(iso) {
+      if (!iso) return 'No end date';
+      return new Date(iso).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+    }
+
+    var planCards = PLANS.map(function(p) {
+      var active = activePlan === p.id;
+      var priceField = p.id !== 'trial'
+        ? '<div style="display:flex;align-items:center;gap:4px;margin-top:6px"><span style="color:var(--text-3);font-size:12px">\u20b9</span><input id="ss_price_'+p.id+'" type="number" value="'+(sp[p.id]||0)+'" min="0" placeholder="0" onclick="event.stopPropagation()" style="font-size:13px;font-weight:700;padding:5px 8px;background:var(--bg-0);border:1px solid var(--border);border-radius:6px;color:var(--text-1);width:100%" /></div>'
+        : '';
+      return '<div id="ss_card_'+p.id+'" data-plan="'+p.id+'" onclick="mt_ssSelectPlan(this.dataset.plan)" style="display:flex;flex-direction:column;background:var(--bg-2);border:2px solid '+(active?'var(--accent)':'var(--border)')+';border-radius:8px;padding:10px;cursor:pointer;transition:border 0.15s"><div style="display:flex;align-items:center;gap:8px"><div id="ss_dot_'+p.id+'" style="width:16px;height:16px;border-radius:50%;background:'+(active?'var(--accent)':'transparent')+';border:2px solid '+(active?'var(--accent)':'var(--text-3)')+';flex-shrink:0"></div><div><div style="font-size:12px;font-weight:700;color:var(--text-0)">'+p.label+'</div><div style="font-size:10px;color:var(--text-3)">'+p.dur+'</div></div></div>'+priceField+'</div>';
+    }).join('');
+
+    var endDate = calcEnd(activePlan, graceDays);
+    var existing = document.getElementById('settingsOverlay');
+    if (existing) existing.remove();
+    var ov = document.createElement('div');
+    ov.id = 'settingsOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:var(--bg-0);z-index:10025;overflow-y:auto';
+    ov.innerHTML = '<div style="max-width:500px;margin:0 auto;padding:16px">'
+      + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;position:sticky;top:0;background:var(--bg-0);padding:8px 0;border-bottom:1px solid var(--border-light)">'
+      + '<button onclick="mt_ssClose()" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-2);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600">← Back</button>'
+      + '<h2 style="font-size:16px;font-weight:800;color:var(--text-0)">&amp;#9881;&#65039; Settings \u2014 '+stationName+'</h2>'
+      + '</div>'
+      + '<div style="background:var(--bg-2);border-radius:8px;padding:12px;margin-bottom:12px">'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">'
+      + '<div><label style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase">Status</label><select id="ss_status" style="width:100%;margin-top:4px;padding:8px;background:var(--bg-0);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-size:13px">'
+      + ['trial','active','suspended'].map(function(s){return '<option value="'+s+'" '+(sub.status===s?'selected':'')+'>'+{trial:'Trial',active:'Active',suspended:'Suspended'}[s]+'</option>';}).join('')
+      + '</select></div>'
+      + '<div><label style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase">Grace Days</label><input id="ss_grace" type="number" value="'+graceDays+'" min="0" max="30" oninput="mt_ssUpdateEndDate()" style="width:100%;margin-top:4px;padding:8px;background:var(--bg-0);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-size:13px" /></div>'
+      + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
+      + '<div><label style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase">Trial Days</label><input id="ss_trial" type="number" value="'+(sub.trial_days||30)+'" min="0" style="width:100%;margin-top:4px;padding:8px;background:var(--bg-0);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-size:13px" /></div>'
+      + '<div><label style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase">Owner WhatsApp</label><input id="ss_phone" type="tel" value="'+(sub.owner_phone||'')+'" placeholder="+91XXXXXXXXXX" style="width:100%;margin-top:4px;padding:8px;background:var(--bg-0);border:1px solid var(--border);border-radius:6px;color:var(--text-1);font-size:13px" /></div>'
+      + '</div></div>'
+      + '<div style="background:var(--bg-2);border-radius:8px;padding:12px;margin-bottom:12px">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;margin-bottom:10px">Select Plan & Set Price</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">'+planCards+'</div>'
+      + '<input type="hidden" id="ss_plan" value="'+activePlan+'" />'
+      + '<div id="ss_end_display" style="padding:10px;background:var(--bg-0);border-radius:6px;font-size:12px">\ud83d\udcc5 Ends: <span style="color:var(--accent-light);font-weight:700">'+fmtDate(endDate)+'</span><input type="hidden" id="ss_subend" value="'+endDate+'" /></div>'
+      + '</div>'
+      + '<div style="display:flex;gap:8px">'
+      + '<button onclick="mt_ssClose()" style="flex:1;background:var(--bg-2);border:1px solid var(--border);color:var(--text-2);border-radius:8px;padding:12px;font-size:13px;font-weight:700;cursor:pointer">Cancel</button>'
+      + '<button data-tid="'+tenantId+'" onclick="mt_ssDoSave(this.dataset.tid)" style="flex:2;background:var(--accent);border:none;color:#000;border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer">💾 Save Settings</button>'
+      + '</div></div>';
+    document.body.appendChild(ov);
+  } catch(e) { mt_toast('Error: ' + e.message, 'error'); }
+}
+
+function mt_ssClose(){var o=document.getElementById("settingsOverlay");if(o)o.remove();}
+
+function mt_ssSelectPlan(planId) {
+  var plans = ['monthly','quarterly','halfyearly','yearly','trial'];
+  plans.forEach(function(p) {
+    var card=document.getElementById('ss_card_'+p); var dot=document.getElementById('ss_dot_'+p);
+    if (!card||!dot) return;
+    var a = p===planId;
+    card.style.border = a?'2px solid var(--accent)':'2px solid var(--border)';
+    dot.style.background = a?'var(--accent)':'transparent';
+    dot.style.border = a?'2px solid var(--accent)':'2px solid var(--text-3)';
+  });
+  var h = document.getElementById('ss_plan'); if(h) h.value = planId;
+  mt_ssUpdateEndDate();
+}
+
+function mt_ssUpdateEndDate() {
+  var planId = document.getElementById('ss_plan')?.value||'trial';
+  var grace  = parseInt(document.getElementById('ss_grace')?.value)||0;
+  var MONTHS = {monthly:1,quarterly:3,halfyearly:6,yearly:12,trial:0};
+  var months = MONTHS[planId]||0;
+  var hidden = document.getElementById('ss_subend');
+  var display = document.getElementById('ss_end_display');
+  if (!hidden||!display) return;
+  if (!months) {
+    hidden.value='';
+    display.innerHTML='\ud83d\udcc5 Ends: <span style="color:var(--text-3)">No end date (trial only)</span><input type="hidden" id="ss_subend" value="" />';
+  } else {
+    var d=new Date(); d.setMonth(d.getMonth()+months); d.setDate(d.getDate()+grace);
+    var iso=d.toISOString().slice(0,10);
+    var lbl=d.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+    hidden.value=iso;
+    display.innerHTML='\ud83d\udcc5 Ends: <span style="color:var(--accent-light);font-weight:700">'+lbl+'</span><input type="hidden" id="ss_subend" value="'+iso+'" />';
+  }
+}
+
+async function mt_ssDoSave(tenantId) {
+  var status = document.getElementById('ss_status')?.value||'trial';
+  var plan   = document.getElementById('ss_plan')?.value||'trial';
+  var trial  = parseInt(document.getElementById('ss_trial')?.value)||0;
+  var grace  = parseInt(document.getElementById('ss_grace')?.value)||3;
+  var phone  = document.getElementById('ss_phone')?.value?.trim()||'';
+  var subEnd = document.getElementById('ss_subend')?.value||null;
+  var prices = {};
+  ['monthly','quarterly','halfyearly','yearly'].forEach(function(p){
+    var el=document.getElementById('ss_price_'+p); if(el) prices[p]=parseFloat(el.value)||0;
+  });
+  if (plan!=='trial'&&subEnd) status='active';
+  try {
+    var tok=typeof getAuthToken==='function'?getAuthToken():'';
+    var r=await fetch('/api/subscriptions/'+encodeURIComponent(tenantId),{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},body:JSON.stringify({status,plan,trial_days:trial,price_monthly:prices.monthly||0,grace_days:grace,sub_end:subEnd||null,owner_phone:phone,notes:'Prices: '+JSON.stringify(prices)})});
+    if (!r.ok){var e2=await r.json();mt_toast(e2.error||'Save failed','error');return;}
+    mt_toast('\u2705 Settings saved!','success');
+    document.getElementById('settingsOverlay').remove();
+    _billingCache=null; await mt_loadBillingData();
+  } catch(e){mt_toast('Error: '+e.message,'error');}
+}
+
+
+
+function mt_confirmDialog(title, bodyHtml, confirmLabel) {
+  return new Promise(function(resolve) {
+    // Remove any stale dialog left over from a previous call that never resolved
+    document.querySelectorAll('[data-mtconfirm]').forEach(function(el) { el.remove(); });
+
+    var overlay = document.createElement('div');
+    overlay.setAttribute('data-mtconfirm', '1');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10020;display:flex;align-items:center;justify-content:center;padding:20px';
+
+    // FIX: Removed duplicate overlay.innerHTML assignment (first line immediately overwrote itself).
+    overlay.innerHTML = '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;width:100%;max-width:420px;max-height:80vh;overflow-y:auto">'
+      + '<div style="font-size:15px;font-weight:800;color:var(--text-0);margin-bottom:16px">'+title+'</div>'
+      + bodyHtml
+      + '<div style="display:flex;gap:8px;margin-top:16px">'
+      + '<button onclick="this.closest(\'[data-mtconfirm]\').remove();window._mtConfirmResolve(false)" style="flex:1;background:var(--bg-2);border:1px solid var(--border);color:var(--text-2);border-radius:6px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">Cancel</button>'
+      + '<button onclick="var _ov=this.closest(\'[data-mtconfirm]\');window._mtConfirmResolve(_ov||true)" style="flex:1;background:var(--accent);border:none;color:#000;border-radius:6px;padding:10px;font-size:13px;font-weight:700;cursor:pointer">'+confirmLabel+'</button>'
+      + '</div></div>';
+
+    window._mtConfirmResolve = resolve;
+
+    // FIX: Missing document.body.appendChild — the dialog was built in memory but never
+    // inserted into the DOM. mt_recordPaymentFromBilling awaits this Promise, which hung
+    // forever because the buttons were never visible. This is why pressing "Record Payment"
+    // did absolutely nothing — the modal existed, it just wasn't on the page.
+    document.body.appendChild(overlay);
+  });
 }
 
 async function mt_openCompareStations() {

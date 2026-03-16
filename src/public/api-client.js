@@ -397,7 +397,7 @@ async function flushOfflineQueue() {
   // Only keep the ops that failed (preserve them for next retry)
   _queueClear();
   if (failedOps.length > 0) {
-    try { localStorage.setItem('_fb_offline_queue', JSON.stringify(failedOps)); } catch(e) {}
+    try { localStorage.setItem(_OFFLINE_QUEUE_KEY, JSON.stringify(failedOps)); } catch(e) {}
   }
 
   window._offlineFlushing = false;

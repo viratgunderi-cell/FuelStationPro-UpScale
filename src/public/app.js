@@ -320,10 +320,10 @@ async function doResetEmployeePin() {
   try {
     const hash = await sha256(pin);
     emp.pinHash = hash;
+    // FIX BUG-08: Write only to the server (PostgreSQL via REST). Removed the duplicate
+    // localStorage saveEmpPins() write which diverged from the server after any reload
+    // and could allow employee login with an old PIN while offline.
     await db.put('employees', emp);
-    const pins = loadEmpPins();
-    pins[empId] = hash;
-    saveEmpPins(pins);
     closeModal();
     toast(`PIN reset for ${emp.name}`, 'success');
     renderPage();
@@ -364,8 +364,12 @@ async function saveAdminPassword() {
   tenants[tIdx].adminUsers[idx].passHash = hash;
   mt_saveTenants(tenants);
   mt_setActiveTenant(tenants[tIdx]);
-  // Update in-memory ADMIN_USERS
-  ADMIN_USERS[idx].passHash = hash;
+  // FIX INFO-02: Guard ADMIN_USERS — it only exists in the local-only (non-API) code path.
+  // The bridge overrides saveAdminPassword() to use the API, so this line only runs in
+  // legacy mode. Guard prevents a ReferenceError crash if the bridge is somehow bypassed.
+  if (typeof ADMIN_USERS !== 'undefined' && Array.isArray(ADMIN_USERS) && ADMIN_USERS[idx]) {
+    ADMIN_USERS[idx].passHash = hash;
+  }
   APP.tenant = tenants[tIdx];
   closeModal();
   toast('Password updated', 'success');

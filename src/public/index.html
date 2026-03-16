@@ -56,8 +56,8 @@
   </style>
   <!-- FIX F-07: Self-hosted Chart.js so it works offline via SW cache. CDN as fallback. -->
   <script src="/chart.min.js" defer onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';document.head.appendChild(s)"></script>
-  <!-- ENHANCED FEATURES: Auto-save functionality -->
-  <script src="/autosave.js" defer></script>
+  <!-- FIX BUG-05: Removed 'defer' from autosave.js here; it is now loaded at the
+       bottom of <body> after all core scripts so it can safely reference utils like toast(). -->
 </head>
 <body>
 
@@ -145,7 +145,7 @@
 
   // Register service worker v12 — works on any HTTPS or localhost origin
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=13.0', { scope: '/' })  // FIX F-08: version matches sw.js
+    navigator.serviceWorker.register('/sw.js?v=20.0', { scope: '/' })  // FIX F-08: version matches sw.js
       .then(function(reg) {
         reg.update(); // check for updates on every load
 
@@ -900,13 +900,15 @@ try {
 </script>
 
 <!-- FuelBunk Pro — Backend Integration (SQLite REST API) -->
-<script src="/api-client.js?v=13"></script>
+<script src="/api-client.js?v=14"></script>
 
-<script src="/multitenant.js?v=13"></script>
-<script src="/utils.js?v=13"></script>
-<script src="/admin.js?v=13"></script>
-<script src="/employee.js?v=13"></script>
-<script src="/app.js?v=13"></script>
-<script src="/bridge.js?v=13"></script>
+<script src="/multitenant.js?v=20"></script>
+<script src="/utils.js?v=14"></script>
+<script src="/admin.js?v=18"></script>
+<script src="/employee.js?v=16"></script>
+<script src="/app.js?v=14"></script>
+<script src="/bridge.js?v=14"></script>
+<!-- FIX BUG-05: autosave.js loaded last — after utils.js so toast() and other helpers exist -->
+<script src="/autosave.js"></script>
 </body>
 </html>
